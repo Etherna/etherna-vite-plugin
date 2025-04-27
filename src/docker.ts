@@ -279,12 +279,13 @@ export async function startBeeNodes(name: string, mode: "http" | "https" = "http
     lastLog = undefined
 
     const text = String(data)
-    if (/(starting in full mode)|("address"="\[\:\:\]\:\d+")/gm.test(text)) {
+    if (/"address"="\[\:\:\]\:\d+"/gm.test(text)) {
       logSuccess(name, mode, env.BEE_PORT ?? "1633")
       endPromise?.()
     }
 
-    if (/"level"="error"/gm.test(text)) {
+    const excludedErrorRegexes = [/\"logger\"=\"node\/storageincentives\"/gm]
+    if (/"level"="error"/gm.test(text) && !excludedErrorRegexes.some((regex) => regex.test(text))) {
       logError(name, text)
       endPromise?.()
     } else {
