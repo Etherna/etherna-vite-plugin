@@ -125,6 +125,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       BEE_POSTAGE_STAMP_START_BLOCK: "1",
       BEE_NETWORK_ID: "4020",
       BEE_FULL_NODE: "true",
+      BEE_PORT,
       BEE_API_ADDR: `0.0.0.0:${BEE_PORT}`,
       BEE_CORS_ALLOWED_ORIGINS: "*",
       BEE_ALLOW_PRIVATE_CIDRS: "true",
@@ -141,9 +142,19 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       VALIDATOR_HOST: `localhost:${gatewayPort}`,
       VALIDATOR_SCHEME: mode,
     },
-  } as const
+  } satisfies Record<string, Record<string, string | number>>
 
-  return ((envs as Record<string, unknown>)[name] ?? null) as T extends keyof typeof envs
-    ? (typeof envs)[T]
-    : (typeof envs)[keyof typeof envs] | null
+  type UnionToIntersection<Union> = (
+    Union extends unknown ? (distributedUnion: Union) => void : never
+  ) extends (mergedIntersection: infer Intersection) => void
+    ? Intersection & Union
+    : never
+  type Env = typeof envs
+  type AnyEnv = UnionToIntersection<Env[keyof Env]>
+
+  type AnyEnvKey = keyof AnyEnv
+
+  return ((envs as Record<string, unknown>)[name] ?? null) as T extends keyof Env
+    ? Env[T]
+    : Partial<Record<AnyEnvKey, string>> | null
 }

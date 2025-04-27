@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process"
-import { resolve } from "node:path"
+import path from "node:path"
 import chalk from "chalk"
+
+import { DEFAULT_CACHE_DIR } from "./consts"
 
 import type { SpawnOptionsWithoutStdio } from "node:child_process"
 
 export function resolvePath(...paths: string[]) {
-  return resolve(import.meta.dirname, ...paths).replace(/:/g, "/")
+  return path.resolve(DEFAULT_CACHE_DIR, ...paths).replace(/:/g, "\\\\")
 }
 
 export function logSuccess(containerName: string, protocol: string, port: string) {

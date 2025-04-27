@@ -1,3 +1,5 @@
+export const DEFAULT_CACHE_DIR = "node_modules/.vite"
+
 export const CERTIFICATE_DIR = ".ssl"
 export const CERTIFICATE_CERT_NAME = "etherna.crt"
 export const CERTIFICATE_KEY_NAME = "etherna.key"

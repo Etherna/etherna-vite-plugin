@@ -19,7 +19,7 @@ interface DockerPluginOptions {
   interceptor?: boolean
 }
 
-export function etherna(options: DockerPluginOptions): Plugin {
+export function etherna(options: DockerPluginOptions = {}): Plugin {
   const spawns = [] as ChildProcess[]
 
   if (options.https) {

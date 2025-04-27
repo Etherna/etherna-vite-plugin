@@ -251,7 +251,7 @@ export async function startBlockchain(name: string, mode: "http" | "https") {
   return proc
 }
 
-export async function startBeeNodes(name: string, _mode: "http" | "https") {
+export async function startBeeNodes(name: string, mode: "http" | "https" = "http") {
   const volumeName = "etherna_bee-volume"
   await createContainerVolume(volumeName)
 
@@ -261,7 +261,7 @@ export async function startBeeNodes(name: string, _mode: "http" | "https") {
     endPromise = res
   })
 
-  const env = getEnv(name, "http") ?? {}
+  const env = getEnv(name, mode) ?? {}
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -279,7 +279,8 @@ export async function startBeeNodes(name: string, _mode: "http" | "https") {
     lastLog = undefined
 
     const text = String(data)
-    if (/starting in full mode/gm.test(text)) {
+    if (/(starting in full mode)|("address"="\[\:\:\]\:\d+")/gm.test(text)) {
+      logSuccess(name, mode, env.BEE_PORT ?? "1633")
       endPromise?.()
     }
 
