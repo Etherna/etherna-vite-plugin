@@ -58,7 +58,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         config.server.https = Object.assign({}, config.server.https, https)
         config.preview.https = Object.assign({}, config.preview.https, https)
       }
-      config.server.port = getEnv("app", options.https ? "https" : "http").port
+      config.server.port ??= getEnv("app", options.https ? "https" : "http").port
     },
     configureServer(server) {
       const mode = options.https ? "https" : "http"

@@ -91,6 +91,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       ASPNETCORE_URLS: gatewayUrl,
       "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
       "SsoServer:BaseUrl": ssoUrl,
+      "SsoServer:Clients:Credit:BaseUrl": creditUrl,
       "SsoServer:AllowUnsafeConnection": "true",
       "BeehiveManager:Url": beehiveUrl,
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
