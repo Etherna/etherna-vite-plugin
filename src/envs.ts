@@ -5,7 +5,9 @@ const APP_HTTPS_PORT = 5371
 
 const MONGODB_PORT = 27017
 const BEE_PORT = 1633
-export const BLOCKCHAIN_PORT = 9545
+const BEE_P2P_PORT = 1634
+const BLOCKCHAIN_PORT = 9545
+const NETWORK_ID = 4020
 
 const SSO_HTTP_PORT = 32610
 const SSO_HTTPS_PORT = 42610
@@ -108,7 +110,8 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "ConnectionStrings:BeehiveManagerDb": `${mongodbUrl}/beehiveManagerDev`,
     },
     "etherna-blockchain": {
-      port: BLOCKCHAIN_PORT,
+      BLOCKCHAIN_PORT,
+      NETWORK_ID,
     },
     "etherna-bee": {
       BEE_WARMUP_TIME: "10s",
@@ -116,7 +119,8 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       BEE_VERBOSITY: "4",
       BEE_SWAP_ENABLE: "true",
       BEE_MAINNET: "false",
-      BEE_SWAP_ENDPOINT: `http://localhost:${BLOCKCHAIN_PORT}`,
+      BEE_SWAP_ENDPOINT: `http://etherna-blockchain:${BLOCKCHAIN_PORT}`,
+      BEE_BLOCKCHAIN_RPC_ENDPOINT: `http://etherna-blockchain:${BLOCKCHAIN_PORT}`,
       BEE_PASSWORD: "password",
       BEE_SWAP_FACTORY_ADDRESS: "0xCfEB869F69431e42cdB54A4F4f105C19C080A601",
       BEE_POSTAGE_STAMP_ADDRESS: "0x254dffcd3277C0b1660F6d42EFbB754edaBAbC2B",
@@ -124,12 +128,16 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       BEE_REDISTRIBUTION_ADDRESS: "0x9561C133DD8580860B6b7E504bC5Aa500f0f06a7",
       BEE_STAKING_ADDRESS: "0xD833215cBcc3f914bD1C9ece3EE7BF8B14f841bb",
       BEE_POSTAGE_STAMP_START_BLOCK: "1",
-      BEE_NETWORK_ID: "4020",
+      BEE_NETWORK_ID: NETWORK_ID,
       BEE_FULL_NODE: "true",
       BEE_PORT,
+      BEE_P2P_PORT,
       BEE_API_ADDR: `0.0.0.0:${BEE_PORT}`,
+      BEE_P2P_ADDR: `0.0.0.0:${BEE_P2P_PORT}`,
       BEE_CORS_ALLOWED_ORIGINS: "*",
       BEE_ALLOW_PRIVATE_CIDRS: "true",
+      BEE_BOOTNODE_MODE: "",
+      BEE_BOOTNODE: "",
     },
     "etherna-interceptor": {
       BASE_HOST: "localhost",

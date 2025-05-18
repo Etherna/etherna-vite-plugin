@@ -65,17 +65,17 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
       // Start container once dev server is listening
       server.httpServer?.once("listening", async () => {
         if (options.bee !== false) {
-          void startBlockchain("etherna-blockchain", mode)
+          void startBlockchain(mode)
             .then((p) => {
               spawns.push(p)
-              return startBeeNodes("etherna-bee", mode)
+              return startBeeNodes(mode)
             })
-            .then((p) => {
-              spawns.push(p)
+            .then((procs) => {
+              spawns.push(...procs)
             })
         }
         if (options.mongo !== false) {
-          spawns.push(await startMongoDbContainer("etherna-mongodb"))
+          spawns.push(await startMongoDbContainer())
         }
         if (options.beehiveManager !== false) {
           void startAspContainer(

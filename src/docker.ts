@@ -4,7 +4,16 @@ import fs from "node:fs"
 import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
 import { getEnv } from "./envs"
 import { trustContainerCertificate } from "./ssl"
-import { logError, logLoading, logSuccess, resolvePath } from "./utils"
+import {
+  getBeeUnderlayAddress,
+  logError,
+  logLoading,
+  logSuccess,
+  resolvePath,
+  resolvePathEscape,
+} from "./utils"
+
+const BEE_NETWORK_NAME = "etherna_bee_network"
 
 export async function startDockerContainer({
   containerName,
@@ -40,7 +49,8 @@ export async function startDockerContainer({
   return proc
 }
 
-export async function startMongoDbContainer(name: string) {
+export async function startMongoDbContainer() {
+  const name = "etherna-mongodb"
   const dbVolumeName = `etherna_${name}-db-volume`
   const configDbVolumeName = `etherna_${name}-configdb-volume`
   await Promise.all([
@@ -112,7 +122,7 @@ export async function startAspContainer(name: string, image: string, mode: "http
     args: [
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       ...(mode === "https"
-        ? ["-v", `${resolvePath(CERTIFICATE_DIR)}:${CONTAINER_CERTS_DIR}/`]
+        ? ["-v", `${resolvePathEscape(CERTIFICATE_DIR)}:${CONTAINER_CERTS_DIR}/`]
         : []),
       "--network",
       "host",
@@ -161,8 +171,11 @@ export async function startAspContainer(name: string, image: string, mode: "http
   return proc
 }
 
-export async function startBlockchain(name: string, mode: "http" | "https") {
+export async function startBlockchain(mode: "http" | "https") {
+  const name = "etherna-blockchain"
   const volumeName = "etherna_blockchain-volume"
+
+  await createNetwork(BEE_NETWORK_NAME)
   await createContainerVolume(volumeName)
 
   let lastLog: string | undefined = undefined
@@ -189,11 +202,15 @@ export async function startBlockchain(name: string, mode: "http" | "https") {
     args: [
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       "--network",
-      "host",
+      BEE_NETWORK_NAME,
+      "-p",
+      `${env.BLOCKCHAIN_PORT}:${env.BLOCKCHAIN_PORT}`,
+      "-p",
+      `${env.BLOCKCHAIN_PORT + 1}:${env.BLOCKCHAIN_PORT + 1}`,
       "--mount",
       `type=volume,source=${volumeName},target=/root/.ethereum`,
       "-v",
-      `${resolvePath(".ethereum")}:/root/extra`,
+      `${resolvePathEscape(".ethereum")}:/root/extra`,
     ],
     cmd: [
       "--allow-insecure-unlock",
@@ -204,15 +221,15 @@ export async function startBlockchain(name: string, mode: "http" | "https") {
       "--http",
       '--http.api="debug,web3,eth,txpool,net,personal"',
       "--http.corsdomain=*",
-      "--http.port=9545",
+      `--http.port=${env.BLOCKCHAIN_PORT}`,
       "--http.addr=0.0.0.0",
       "--http.vhosts=*",
       "--ws",
       '--ws.api="debug,web3,eth,txpool,net,personal"',
-      "--ws.port=9546",
+      `--ws.port=${env.BLOCKCHAIN_PORT + 1}`,
       "--ws.origins=*",
       "--maxpeers=0",
-      "--networkid=4020",
+      `--networkid=${env.NETWORK_ID}`,
       "--authrpc.vhosts=*",
       "--authrpc.addr=0.0.0.0",
     ],
@@ -251,8 +268,31 @@ export async function startBlockchain(name: string, mode: "http" | "https") {
   return proc
 }
 
-export async function startBeeNodes(name: string, mode: "http" | "https" = "http") {
-  const volumeName = "etherna_bee-volume"
+export async function startBeeNodes(mode: "http" | "https" = "http") {
+  const name = "etherna-bee"
+
+  const queenProc = await startBeeNode(name, mode)
+
+  const bootnode = await getBeeUnderlayAddress(
+    `http://localhost:${getEnv("etherna-bee", mode)?.BEE_PORT ?? "1633"}`,
+  )
+
+  const [worker1Proc] = await Promise.all([
+    startBeeNode(name, mode, 1, bootnode),
+    // startBeeNode(name, mode, 2, bootnode),
+    // startBeeNode(name, mode, 3, bootnode),
+    // startBeeNode(name, mode, 4, bootnode),
+  ])
+  return [queenProc, worker1Proc]
+}
+
+export async function startBeeNode(
+  name: string,
+  mode: "http" | "https" = "http",
+  worker?: 1 | 2 | 3 | 4,
+  bootnode?: string,
+) {
+  const volumeName = worker ? `etherna_bee_worker_${worker}-volume` : "etherna_bee-volume"
   await createContainerVolume(volumeName)
 
   let lastLog: string | undefined = undefined
@@ -263,15 +303,33 @@ export async function startBeeNodes(name: string, mode: "http" | "https" = "http
 
   const env = getEnv(name, mode) ?? {}
 
+  if (!worker) {
+    delete env.BEE_BOOTNODE
+    env.BEE_BOOTNODE_MODE = "false"
+  } else {
+    delete env.BEE_BOOTNODE_MODE
+    env.BEE_BOOTNODE = bootnode
+  }
+
+  if (worker) {
+    name = `${name}_worker_${worker}`
+  }
+
   const proc = await startDockerContainer({
     containerName: name,
-    imageName: "fairdatasociety/fdp-play-queen:latest",
+    imageName: worker
+      ? `fairdatasociety/fdp-play-worker-${worker}`
+      : "fairdatasociety/fdp-play-queen:latest",
     args: [
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       "--mount",
       `type=volume,source=${volumeName},target=/home/bee/.bee`,
       "--network",
-      "host",
+      BEE_NETWORK_NAME,
+      "-p",
+      `${worker ? parseInt(env.BEE_PORT ?? "1633") + worker * 10000 : env.BEE_PORT}:${env.BEE_PORT}`,
+      "-p",
+      `${worker ? parseInt(env.BEE_P2P_PORT ?? "1634") + worker * 10000 : env.BEE_P2P_PORT}:${env.BEE_P2P_PORT}`,
     ],
     cmd: ["start"],
   })
@@ -280,7 +338,9 @@ export async function startBeeNodes(name: string, mode: "http" | "https" = "http
 
     const text = String(data)
     if (/"address"="\[\:\:\]\:\d+"/gm.test(text)) {
-      logSuccess(name, mode, env.BEE_PORT ?? "1633")
+      if (!worker) {
+        logSuccess(name, mode, env.BEE_PORT ?? "1633")
+      }
       endPromise?.()
     }
 
@@ -384,6 +444,16 @@ async function stopContainer(name: string) {
 
 async function createContainerVolume(volumeName: string) {
   const proc = spawn("docker", ["volume", "create", volumeName])
+
+  await new Promise<void>((res) => {
+    proc.on("close", () => {
+      res()
+    })
+  })
+}
+
+async function createNetwork(networkName: string) {
+  const proc = spawn("docker", ["network", "create", networkName])
 
   await new Promise<void>((res) => {
     proc.on("close", () => {

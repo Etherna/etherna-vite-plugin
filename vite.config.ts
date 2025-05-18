@@ -6,5 +6,16 @@ export default defineConfig({
   server: {
     port: 5174,
   },
-  plugins: [etherna()],
+  plugins: [
+    etherna({
+      bee: true,
+      beehiveManager: true,
+      sso: true,
+      credit: true,
+      index: true,
+      gateway: true,
+      mongo: true,
+      interceptor: false,
+    }),
+  ],
 })
