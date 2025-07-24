@@ -82,7 +82,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             })
         }
         if (options.elastic !== false) {
-          void startElasticContainer().then(spawns.push)
+          void startElasticContainer().then((p) => spawns.push(p))
         }
         if (options.mongo !== false) {
           spawns.push(await startMongoDbContainer())
