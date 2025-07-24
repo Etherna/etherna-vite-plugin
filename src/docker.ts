@@ -196,6 +196,7 @@ export async function startAspContainer(name: string, image: string, mode: "http
     const excludedErrorRegexes = [
       /Current db does not support change stream/gm,
       /is only supported on replica sets./gm,
+      /Failed to process the job/gm,
     ]
     if (/Exception:.+/gm.test(text) && !excludedErrorRegexes.some((regex) => regex.test(text))) {
       logError(name, text)
