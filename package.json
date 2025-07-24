@@ -1,6 +1,6 @@
 {
   "name": "@etherna/vite-plugin",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Vite plugin for Etherna services in Vite",
   "author": "Mattia Dalzocchio",
   "license": "LGPL-3.0-or-later",
@@ -37,20 +37,20 @@
     "node-forge": "1.3.1"
   },
   "devDependencies": {
-    "@eslint/js": "9.25.1",
-    "@ianvs/prettier-plugin-sort-imports": "4.4.1",
-    "@types/node": "22.15.2",
-    "@types/node-forge": "1.3.11",
+    "@eslint/js": "9.31.0",
+    "@ianvs/prettier-plugin-sort-imports": "4.5.1",
+    "@types/node": "24.1.0",
+    "@types/node-forge": "1.3.13",
     "chalk": "^5.4.1",
-    "eslint": "9.25.1",
-    "eslint-config-prettier": "10.1.2",
-    "eslint-plugin-prettier": "5.2.6",
-    "globals": "16.0.0",
-    "prettier": "3.5.3",
-    "tsup": "8.4.0",
+    "eslint": "9.31.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-prettier": "5.5.3",
+    "globals": "16.3.0",
+    "prettier": "3.6.2",
+    "tsup": "8.5.0",
     "typescript": "5.8.3",
-    "typescript-eslint": "8.31.0",
-    "vite": "6.3.3"
+    "typescript-eslint": "8.38.0",
+    "vite": "7.0.6"
   },
   "packageManager": "pnpm@10.9.0+sha512.0486e394640d3c1fb3c9d43d49cf92879ff74f8516959c235308f5a8f62e2e19528a65cdc2a3058f587cde71eba3d5b56327c8c33a97e4c4051ca48a10ca2d5f",
   "engines": {

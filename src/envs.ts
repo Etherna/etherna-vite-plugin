@@ -38,6 +38,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const creditUrl = `${mode}://localhost:${creditPort}`
   const gatewayUrl = `${mode}://localhost:${gatewayPort}`
   const beehiveUrl = `${mode}://localhost:${beehivePort}`
+  const beeUrl = `http://localhost:${BEE_PORT}`
 
   const baseAspEnv = {
     ASPNETCORE_ENVIRONMENT: "Development",
@@ -53,6 +54,11 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const envs = {
     app: {
       port: appPort,
+    },
+    elastic: {
+      "discovery.type": "single-node",
+      "xpack.security.enabled": "false",
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m",
     },
     "etherna-sso": {
       ...baseAspEnv,
@@ -108,6 +114,11 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveManagerDataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveManagerHangfireDev`,
       "ConnectionStrings:BeehiveManagerDb": `${mongodbUrl}/beehiveManagerDev`,
+      // "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveDataProtectionDev`,
+      // "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveHangfireDev`,
+      // "ConnectionStrings:BeehiveDb": `${mongodbUrl}/beehiveDev`,
+      // "SeedDb:BeeNodes:0:ConnectionString": beeUrl,
+      // "SeedDb:BeeNodes:0:EnableBatchCreation": "true",
     },
     "etherna-blockchain": {
       BLOCKCHAIN_PORT,

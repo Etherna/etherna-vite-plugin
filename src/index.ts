@@ -1,6 +1,12 @@
 import chalk from "chalk"
 
-import { startAspContainer, startBeeNodes, startBlockchain, startMongoDbContainer } from "./docker"
+import {
+  startAspContainer,
+  startBeeNodes,
+  startBlockchain,
+  startElasticContainer,
+  startMongoDbContainer,
+} from "./docker"
 import { getEnv } from "./envs"
 import { generateSslCertificate } from "./ssl"
 
@@ -9,6 +15,7 @@ import type { Plugin, ServerOptions } from "vite"
 
 interface DockerPluginOptions {
   https?: boolean
+  elastic?: boolean
   mongo?: boolean
   bee?: boolean
   sso?: boolean
@@ -73,6 +80,9 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             .then((procs) => {
               spawns.push(...procs)
             })
+        }
+        if (options.elastic !== false) {
+          void startElasticContainer().then(spawns.push)
         }
         if (options.mongo !== false) {
           spawns.push(await startMongoDbContainer())

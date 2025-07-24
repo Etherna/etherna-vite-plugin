@@ -105,6 +105,57 @@ export async function startMongoDbContainer() {
   return proc
 }
 
+export async function startElasticContainer() {
+  const name = "elastic"
+  const dataVolumeName = `etherna_${name}-data-volume`
+  await createContainerVolume(dataVolumeName)
+
+  let endPromise = undefined as undefined | (() => void)
+  const promise = new Promise<void>((res) => {
+    endPromise = res
+  })
+
+  const env = getEnv(name, "http") ?? {}
+
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName: "elasticsearch:7.17.24",
+    args: [
+      ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
+      "--mount",
+      `type=volume,source=${dataVolumeName},target=/usr/share/elasticsearch/data`,
+      "--network",
+      "host",
+      "--memory=512m",
+    ],
+    cmd: [],
+  })
+
+  const handleStdData = (data: unknown) => {
+    const text = String(data)
+    if (/"message": "started"/gm.test(text)) {
+      logSuccess(name, "http", "9200")
+      endPromise?.()
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    endPromise?.()
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, `Container closed with code ${code}`)
+    endPromise?.()
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
 export async function startAspContainer(name: string, image: string, mode: "http" | "https") {
   let endPromise = undefined as undefined | (() => void)
   const promise = new Promise<void>((res) => {
