@@ -22,8 +22,8 @@ interface DockerPluginOptions {
   index?: boolean
   gateway?: boolean
   credit?: boolean
-  beehiveManager?: boolean
-  interceptor?: boolean
+  beehive?: boolean
+  validator?: boolean
 }
 
 export function etherna(options: DockerPluginOptions = {}): Plugin {
@@ -32,10 +32,6 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
   if (options.https) {
     options.https = false
     console.log(chalk.yellow(`  HTTPS not supported yet. Falling back to HTTP.`))
-  }
-
-  if (options.interceptor) {
-    console.log(chalk.yellow(`  Interceptor is not supported yet. Use the gateway instead.`))
   }
 
   // kill all spawned containers on process exit
@@ -87,17 +83,13 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         if (options.mongo !== false) {
           spawns.push(await startMongoDbContainer())
         }
-        if (options.beehiveManager !== false) {
+        if (options.beehive !== false) {
           void startAspContainer(
             "etherna-beehive-manager",
             "etherna/beehive-manager:latest",
             mode,
           ).then((p) => spawns.push(p))
         }
-        // TODO: interceptor is not working
-        // if (options.interceptor !== false) {
-        //   void startInterceptor("etherna-interceptor", mode).then((p) => spawns.push(p))
-        // }
         if (options.index !== false) {
           void startAspContainer("etherna-index", "etherna/etherna-index:latest", mode).then((p) =>
             spawns.push(p),
@@ -107,9 +99,18 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           spawns.push(await startAspContainer("etherna-sso", "etherna/etherna-sso:latest", mode))
         }
         if (options.gateway !== false) {
-          void startAspContainer("etherna-gateway", "etherna/etherna-gateway:latest", mode).then(
-            (p) => spawns.push(p),
-          )
+          void startAspContainer(
+            "etherna-gateway-dashboard",
+            "etherna/etherna-gateway-dashboard:latest",
+            mode,
+          ).then((p) => spawns.push(p))
+        }
+        if (options.validator !== false) {
+          void startAspContainer(
+            "etherna-gateway-validator",
+            "etherna/etherna-gateway-validator:latest",
+            mode,
+          ).then((p) => spawns.push(p))
         }
         if (options.credit !== false) {
           void startAspContainer("etherna-credit", "etherna/etherna-credit:latest", mode).then(

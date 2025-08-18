@@ -21,6 +21,9 @@ const CREDIT_HTTPS_PORT = 42630
 const GATEWAY_HTTP_PORT = 32640
 const GATEWAY_HTTPS_PORT = 42640
 
+const VALIDATOR_HTTP_PORT = 32650
+const VALIDATOR_HTTPS_PORT = 42650
+
 const BEEHIVE_HTTP_PORT = 12610
 
 export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
@@ -29,6 +32,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const indexPort = mode === "http" ? INDEX_HTTP_PORT : INDEX_HTTPS_PORT
   const creditPort = mode === "http" ? CREDIT_HTTP_PORT : CREDIT_HTTPS_PORT
   const gatewayPort = mode === "http" ? GATEWAY_HTTP_PORT : GATEWAY_HTTPS_PORT
+  const validatorPort = mode === "http" ? VALIDATOR_HTTP_PORT : VALIDATOR_HTTPS_PORT
   const beehivePort = BEEHIVE_HTTP_PORT
 
   const appUrl = `${mode}://localhost:${appPort}`
@@ -37,6 +41,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const indexUrl = `${mode}://localhost:${indexPort}`
   const creditUrl = `${mode}://localhost:${creditPort}`
   const gatewayUrl = `${mode}://localhost:${gatewayPort}`
+  const validatorUrl = `${mode}://localhost:${validatorPort}`
   const beehiveUrl = `${mode}://localhost:${beehivePort}`
   const beeUrl = `http://localhost:${BEE_PORT}`
 
@@ -49,6 +54,24 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
           ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
         }
       : {}),
+  }
+
+  const gatewayEnvs = {
+    ...baseAspEnv,
+    "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
+    "SsoServer:BaseUrl": ssoUrl,
+    "SsoServer:Clients:Credit:BaseUrl": creditUrl,
+    "SsoServer:Clients:Credit:Secret": "ethernaGatewayCreditClientSecret",
+    "SsoServer:Clients:Webapp:Secret": "ethernaGatewayWebappClientSecret",
+    "SsoServer:AllowUnsafeConnection": "true",
+    "BeehiveManager:Url": beehiveUrl,
+    "Bee:Url": beeUrl,
+    "Features:GarbageCollectPins": "false",
+    ForwardedAllowedHosts: "*",
+    "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
+    "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaGatewayHangfireDev`,
+    "ConnectionStrings:GatewayDb": `${mongodbUrl}/ethernaGatewayDev`,
+    "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
   }
 
   const envs = {
@@ -94,31 +117,26 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "ConnectionStrings:CreditDb": `${mongodbUrl}/ethernaCreditDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
     },
-    "etherna-gateway": {
-      ...baseAspEnv,
+    "etherna-gateway-dashboard": {
+      ...gatewayEnvs,
       ASPNETCORE_URLS: gatewayUrl,
-      "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
-      "SsoServer:BaseUrl": ssoUrl,
-      "SsoServer:Clients:Credit:BaseUrl": creditUrl,
-      "SsoServer:AllowUnsafeConnection": "true",
-      "BeehiveManager:Url": beehiveUrl,
-      "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
-      "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaGatewayHangfireDev`,
-      "ConnectionStrings:GatewayDb": `${mongodbUrl}/ethernaGatewayDev`,
-      "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
+    },
+    "etherna-gateway-validator": {
+      ...gatewayEnvs,
+      ASPNETCORE_URLS: validatorUrl,
+      "Bee:CachedUrl": beeUrl,
+      "Bee:DirectUrl": beeUrl,
+      "Dashboard:Url": gatewayUrl,
     },
     "etherna-beehive-manager": {
       ...baseAspEnv,
       ASPNETCORE_URLS: beehiveUrl,
       "SeedDb:BeeNodes:0:Hostname": "localhost",
-      "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveManagerDataProtectionDev`,
-      "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveManagerHangfireDev`,
-      "ConnectionStrings:BeehiveManagerDb": `${mongodbUrl}/beehiveManagerDev`,
-      // "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveDataProtectionDev`,
-      // "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveHangfireDev`,
-      // "ConnectionStrings:BeehiveDb": `${mongodbUrl}/beehiveDev`,
-      // "SeedDb:BeeNodes:0:ConnectionString": beeUrl,
-      // "SeedDb:BeeNodes:0:EnableBatchCreation": "true",
+      "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveDataProtectionDev`,
+      "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveHangfireDev`,
+      "ConnectionStrings:BeehiveDb": `${mongodbUrl}/beehiveDev`,
+      "SeedDb:BeeNodes:0:ConnectionString": beeUrl,
+      "SeedDb:BeeNodes:0:EnableBatchCreation": "true",
     },
     "etherna-blockchain": {
       BLOCKCHAIN_PORT,
@@ -149,18 +167,6 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       BEE_ALLOW_PRIVATE_CIDRS: "true",
       BEE_BOOTNODE_MODE: "",
       BEE_BOOTNODE: "",
-    },
-    "etherna-interceptor": {
-      BASE_HOST: "localhost",
-      BASE_HOST_PREFERRED_SCHEMA: mode,
-      BEENODE_CACHED_HOST: `localhost:${BEE_PORT}`,
-      BEENODE_CACHED_SCHEME: mode,
-      BEENODE_DIRECT_HOST: `localhost:${BEE_PORT}`,
-      BEENODE_DIRECT_SCHEME: mode,
-      DASHBOARD_HOST: `localhost:${gatewayPort}`,
-      RESOLVER: "127.0.0.1",
-      VALIDATOR_HOST: `localhost:${gatewayPort}`,
-      VALIDATOR_SCHEME: mode,
     },
   } satisfies Record<string, Record<string, string | number>>
 
