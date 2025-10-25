@@ -41,3 +41,18 @@ Opt out from services
   }),
 // ...
 ```
+
+
+### Disable all containers
+
+```ts
+// ...
+  etherna({
+    enabled: false,
+  }),
+// ...
+```
+
+This will skip the container startup and use the existing containers.
+
+Useful when you want to run the containers separately.

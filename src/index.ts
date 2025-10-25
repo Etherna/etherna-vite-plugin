@@ -14,6 +14,7 @@ import type { ChildProcess } from "node:child_process"
 import type { Plugin, ServerOptions } from "vite"
 
 interface DockerPluginOptions {
+  enabled?: boolean
   https?: boolean
   elastic?: boolean
   mongo?: boolean
@@ -23,7 +24,6 @@ interface DockerPluginOptions {
   gateway?: boolean
   credit?: boolean
   beehive?: boolean
-  validator?: boolean
 }
 
 export function etherna(options: DockerPluginOptions = {}): Plugin {
@@ -64,6 +64,12 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
       config.server.port ??= getEnv("app", options.https ? "https" : "http").port
     },
     configureServer(server) {
+      // Early return when running in isolated mode or disabled
+      if (!options.enabled) {
+        console.log(chalk.yellow(`  Services disabled. Skipping container startup.`))
+        return
+      }
+
       const mode = options.https ? "https" : "http"
       // Start container once dev server is listening
       server.httpServer?.once("listening", async () => {
@@ -99,18 +105,9 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           spawns.push(await startAspContainer("etherna-sso", "etherna/etherna-sso:latest", mode))
         }
         if (options.gateway !== false) {
-          void startAspContainer(
-            "etherna-gateway-dashboard",
-            "etherna/etherna-gateway-dashboard:latest",
-            mode,
-          ).then((p) => spawns.push(p))
-        }
-        if (options.validator !== false) {
-          void startAspContainer(
-            "etherna-gateway-validator",
-            "etherna/etherna-gateway-validator:latest",
-            mode,
-          ).then((p) => spawns.push(p))
+          void startAspContainer("etherna-gateway", "etherna/etherna-gateway:latest", mode).then(
+            (p) => spawns.push(p),
+          )
         }
         if (options.credit !== false) {
           void startAspContainer("etherna-credit", "etherna/etherna-credit:latest", mode).then(

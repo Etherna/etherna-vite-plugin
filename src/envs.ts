@@ -21,9 +21,6 @@ const CREDIT_HTTPS_PORT = 42630
 const GATEWAY_HTTP_PORT = 32640
 const GATEWAY_HTTPS_PORT = 42640
 
-const VALIDATOR_HTTP_PORT = 32650
-const VALIDATOR_HTTPS_PORT = 42650
-
 const BEEHIVE_HTTP_PORT = 12610
 
 export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
@@ -32,7 +29,6 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const indexPort = mode === "http" ? INDEX_HTTP_PORT : INDEX_HTTPS_PORT
   const creditPort = mode === "http" ? CREDIT_HTTP_PORT : CREDIT_HTTPS_PORT
   const gatewayPort = mode === "http" ? GATEWAY_HTTP_PORT : GATEWAY_HTTPS_PORT
-  const validatorPort = mode === "http" ? VALIDATOR_HTTP_PORT : VALIDATOR_HTTPS_PORT
   const beehivePort = BEEHIVE_HTTP_PORT
 
   const appUrl = `${mode}://localhost:${appPort}`
@@ -41,7 +37,6 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
   const indexUrl = `${mode}://localhost:${indexPort}`
   const creditUrl = `${mode}://localhost:${creditPort}`
   const gatewayUrl = `${mode}://localhost:${gatewayPort}`
-  const validatorUrl = `${mode}://localhost:${validatorPort}`
   const beehiveUrl = `${mode}://localhost:${beehivePort}`
   const beeUrl = `http://localhost:${BEE_PORT}`
 
@@ -117,16 +112,11 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "ConnectionStrings:CreditDb": `${mongodbUrl}/ethernaCreditDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
     },
-    "etherna-gateway-dashboard": {
+    "etherna-gateway": {
       ...gatewayEnvs,
       ASPNETCORE_URLS: gatewayUrl,
-    },
-    "etherna-gateway-validator": {
-      ...gatewayEnvs,
-      ASPNETCORE_URLS: validatorUrl,
       "Bee:CachedUrl": beeUrl,
       "Bee:DirectUrl": beeUrl,
-      "Dashboard:Url": gatewayUrl,
     },
     "etherna-beehive-manager": {
       ...baseAspEnv,
