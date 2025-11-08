@@ -65,7 +65,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     },
     configureServer(server) {
       // Early return when running in isolated mode or disabled
-      if (!options.enabled) {
+      if (options.enabled === false) {
         console.log(chalk.yellow(`  Services disabled. Skipping container startup.`))
         return
       }
