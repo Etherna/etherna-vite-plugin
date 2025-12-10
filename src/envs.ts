@@ -51,24 +51,6 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       : {}),
   }
 
-  const gatewayEnvs = {
-    ...baseAspEnv,
-    "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
-    "SsoServer:BaseUrl": ssoUrl,
-    "SsoServer:Clients:Credit:BaseUrl": creditUrl,
-    "SsoServer:Clients:Credit:Secret": "ethernaGatewayCreditClientSecret",
-    "SsoServer:Clients:Webapp:Secret": "ethernaGatewayWebappClientSecret",
-    "SsoServer:AllowUnsafeConnection": "true",
-    "BeehiveManager:Url": beehiveUrl,
-    "Bee:Url": beeUrl,
-    "Features:GarbageCollectPins": "false",
-    ForwardedAllowedHosts: "*",
-    "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
-    "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaGatewayHangfireDev`,
-    "ConnectionStrings:GatewayDb": `${mongodbUrl}/ethernaGatewayDev`,
-    "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
-  }
-
   const envs = {
     app: {
       port: appPort,
@@ -113,10 +95,23 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
     },
     "etherna-gateway": {
-      ...gatewayEnvs,
+      ...baseAspEnv,
       ASPNETCORE_URLS: gatewayUrl,
-      "Bee:CachedUrl": beeUrl,
-      "Bee:DirectUrl": beeUrl,
+      "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
+      "SsoServer:BaseUrl": ssoUrl,
+      "SsoServer:Clients:Credit:BaseUrl": creditUrl,
+      "SsoServer:Clients:Credit:Secret": "ethernaGatewayCreditClientSecret",
+      "SsoServer:Clients:Webapp:Secret": "ethernaGatewayWebappClientSecret",
+      "SsoServer:AllowUnsafeConnection": "true",
+      // "BeehiveManager:Url": beehiveUrl,
+      "Bee:CachedUrl": beehiveUrl,
+      "Bee:DirectUrl": beehiveUrl,
+      "Features:GarbageCollectPins": "false",
+      ForwardedAllowedHosts: "*",
+      "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
+      "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaGatewayHangfireDev`,
+      "ConnectionStrings:GatewayDb": `${mongodbUrl}/ethernaGatewayDev`,
+      "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
     },
     "etherna-beehive-manager": {
       ...baseAspEnv,

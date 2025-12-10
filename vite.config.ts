@@ -9,13 +9,13 @@ export default defineConfig({
   plugins: [
     etherna({
       mongo: true,
-      elastic: false,
-      bee: false,
-      beehive: false,
-      sso: false,
-      credit: false,
-      index: false,
-      gateway: false,
+      elastic: true,
+      bee: true,
+      beehive: true,
+      sso: true,
+      credit: true,
+      index: true,
+      gateway: true,
     }),
   ],
 })

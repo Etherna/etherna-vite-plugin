@@ -31,13 +31,30 @@ export default defineConfig({
 })
 ```
 
-Opt out from services
+#### Opt out from services
 
 ```ts
 // ...
   etherna({
     mongo: false,
     bee: false,
+  }),
+// ...
+```
+
+#### Custom service options
+
+```ts
+// ...
+  etherna({
+    mongo: true,
+    gateway: {
+      enabled: true,
+      env: {
+        "Bee:DirectUrl": "http://localhost:16633",
+        "Bee:CachedUrl": "http://localhost:16633",
+      },
+    },
   }),
 // ...
 ```

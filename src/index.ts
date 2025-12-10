@@ -13,17 +13,22 @@ import { generateSslCertificate } from "./ssl"
 import type { ChildProcess } from "node:child_process"
 import type { Plugin, ServerOptions } from "vite"
 
-interface DockerPluginOptions {
+interface ServiceOptions {
   enabled?: boolean
+  env?: Record<string, string>
+}
+
+interface DockerPluginOptions {
   https?: boolean
-  elastic?: boolean
-  mongo?: boolean
-  bee?: boolean
-  sso?: boolean
-  index?: boolean
-  gateway?: boolean
-  credit?: boolean
-  beehive?: boolean
+  enabled?: boolean
+  elastic?: boolean | ServiceOptions
+  mongo?: boolean | ServiceOptions
+  bee?: boolean | ServiceOptions
+  sso?: boolean | ServiceOptions
+  index?: boolean | ServiceOptions
+  gateway?: boolean | ServiceOptions
+  credit?: boolean | ServiceOptions
+  beehive?: boolean | ServiceOptions
 }
 
 export function etherna(options: DockerPluginOptions = {}): Plugin {
@@ -39,6 +44,16 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     for (const proc of spawns) {
       proc.kill()
     }
+  }
+
+  const isServiceEnabled = (service: keyof DockerPluginOptions) => {
+    return typeof options[service] === "object"
+      ? options[service]?.enabled !== false
+      : options[service] !== false
+  }
+
+  const getServiceEnv = (service: keyof DockerPluginOptions) => {
+    return typeof options[service] === "object" ? options[service]?.env : {}
   }
 
   process.once("SIGINT", () => {
@@ -73,46 +88,63 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
       const mode = options.https ? "https" : "http"
       // Start container once dev server is listening
       server.httpServer?.once("listening", async () => {
-        if (options.bee !== false) {
-          void startBlockchain(mode)
+        if (isServiceEnabled("bee")) {
+          void startBlockchain(mode, getServiceEnv("bee"))
             .then((p) => {
               spawns.push(p)
-              return startBeeNodes(mode)
+              return startBeeNodes(mode, getServiceEnv("bee"))
             })
             .then((procs) => {
               spawns.push(...procs)
             })
         }
-        if (options.elastic !== false) {
-          void startElasticContainer().then((p) => spawns.push(p))
+        if (isServiceEnabled("elastic")) {
+          void startElasticContainer(getServiceEnv("elastic")).then((p) => spawns.push(p))
         }
-        if (options.mongo !== false) {
-          spawns.push(await startMongoDbContainer())
+        if (isServiceEnabled("mongo")) {
+          spawns.push(await startMongoDbContainer(getServiceEnv("mongo")))
         }
-        if (options.beehive !== false) {
+        if (isServiceEnabled("beehive")) {
           void startAspContainer(
             "etherna-beehive-manager",
             "etherna/beehive-manager:latest",
             mode,
+            getServiceEnv("beehive"),
           ).then((p) => spawns.push(p))
         }
-        if (options.index !== false) {
-          void startAspContainer("etherna-index", "etherna/etherna-index:latest", mode).then((p) =>
-            spawns.push(p),
+        if (isServiceEnabled("index")) {
+          void startAspContainer(
+            "etherna-index",
+            "etherna/etherna-index:latest",
+            mode,
+            getServiceEnv("index"),
+          ).then((p) => spawns.push(p))
+        }
+        if (isServiceEnabled("sso")) {
+          spawns.push(
+            await startAspContainer(
+              "etherna-sso",
+              "etherna/etherna-sso:latest",
+              mode,
+              getServiceEnv("sso"),
+            ),
           )
         }
-        if (options.sso !== false) {
-          spawns.push(await startAspContainer("etherna-sso", "etherna/etherna-sso:latest", mode))
+        if (isServiceEnabled("gateway")) {
+          void startAspContainer(
+            "etherna-gateway",
+            "etherna/etherna-gateway:latest",
+            mode,
+            getServiceEnv("gateway"),
+          ).then((p) => spawns.push(p))
         }
-        if (options.gateway !== false) {
-          void startAspContainer("etherna-gateway", "etherna/etherna-gateway:latest", mode).then(
-            (p) => spawns.push(p),
-          )
-        }
-        if (options.credit !== false) {
-          void startAspContainer("etherna-credit", "etherna/etherna-credit:latest", mode).then(
-            (p) => spawns.push(p),
-          )
+        if (isServiceEnabled("credit")) {
+          void startAspContainer(
+            "etherna-credit",
+            "etherna/etherna-credit:latest",
+            mode,
+            getServiceEnv("credit"),
+          ).then((p) => spawns.push(p))
         }
       })
 

@@ -49,7 +49,7 @@ export async function startDockerContainer({
   return proc
 }
 
-export async function startMongoDbContainer() {
+export async function startMongoDbContainer(envs?: Record<string, string>) {
   const name = "etherna-mongodb"
   const dbVolumeName = `etherna_${name}-db-volume`
   const configDbVolumeName = `etherna_${name}-configdb-volume`
@@ -63,7 +63,10 @@ export async function startMongoDbContainer() {
     endPromise = res
   })
 
-  const env = getEnv(name, "http") ?? {}
+  const env = {
+    ...(getEnv(name, "http") ?? {}),
+    ...envs,
+  }
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -105,7 +108,7 @@ export async function startMongoDbContainer() {
   return proc
 }
 
-export async function startElasticContainer() {
+export async function startElasticContainer(envs?: Record<string, string>) {
   const name = "elastic"
   const dataVolumeName = `etherna_${name}-data-volume`
   await createContainerVolume(dataVolumeName)
@@ -115,7 +118,10 @@ export async function startElasticContainer() {
     endPromise = res
   })
 
-  const env = getEnv(name, "http") ?? {}
+  const env = {
+    ...(getEnv(name, "http") ?? {}),
+    ...envs,
+  }
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -156,7 +162,12 @@ export async function startElasticContainer() {
   return proc
 }
 
-export async function startAspContainer(name: string, image: string, mode: "http" | "https") {
+export async function startAspContainer(
+  name: string,
+  image: string,
+  mode: "http" | "https",
+  envs?: Record<string, string>,
+) {
   let endPromise = undefined as undefined | (() => void)
   const promise = new Promise<void>((res) => {
     endPromise = res
@@ -164,7 +175,10 @@ export async function startAspContainer(name: string, image: string, mode: "http
 
   let lastLog: string | undefined = undefined
 
-  const env = getEnv(name as "etherna-sso", mode)
+  const env = {
+    ...(getEnv(name as "etherna-sso", mode) ?? {}),
+    ...envs,
+  }
   const port = env.ASPNETCORE_URLS.split(";")[0]?.split(":")[2] ?? "80"
 
   const proc = await startDockerContainer({
@@ -223,7 +237,7 @@ export async function startAspContainer(name: string, image: string, mode: "http
   return proc
 }
 
-export async function startBlockchain(mode: "http" | "https") {
+export async function startBlockchain(mode: "http" | "https", envs?: Record<string, string>) {
   const name = "etherna-blockchain"
   const volumeName = "etherna_blockchain-volume"
 
@@ -246,7 +260,10 @@ export async function startBlockchain(mode: "http" | "https") {
     })
   }
 
-  const env = getEnv(name, mode) ?? {}
+  const env = {
+    ...(getEnv(name, mode) ?? {}),
+    ...envs,
+  }
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -320,20 +337,23 @@ export async function startBlockchain(mode: "http" | "https") {
   return proc
 }
 
-export async function startBeeNodes(mode: "http" | "https" = "http") {
+export async function startBeeNodes(
+  mode: "http" | "https" = "http",
+  envs?: Record<string, string>,
+) {
   const name = "etherna-bee"
 
-  const queenProc = await startBeeNode(name, mode)
+  const queenProc = await startBeeNode(name, mode, undefined, undefined, envs)
 
   const bootnode = await getBeeUnderlayAddress(
     `http://localhost:${getEnv("etherna-bee", mode)?.BEE_PORT ?? "1633"}`,
   )
 
   const [worker1Proc] = await Promise.all([
-    startBeeNode(name, mode, 1, bootnode),
-    // startBeeNode(name, mode, 2, bootnode),
-    // startBeeNode(name, mode, 3, bootnode),
-    // startBeeNode(name, mode, 4, bootnode),
+    startBeeNode(name, mode, 1, bootnode, envs),
+    // startBeeNode(name, mode, 2, bootnode, envs),
+    // startBeeNode(name, mode, 3, bootnode, envs),
+    // startBeeNode(name, mode, 4, bootnode, envs),
   ])
   return [queenProc, worker1Proc]
 }
@@ -343,6 +363,7 @@ export async function startBeeNode(
   mode: "http" | "https" = "http",
   worker?: 1 | 2 | 3 | 4,
   bootnode?: string,
+  envs?: Record<string, string>,
 ) {
   const volumeName = worker ? `etherna_bee_worker_${worker}-volume` : "etherna_bee-volume"
   await createContainerVolume(volumeName)
@@ -353,7 +374,10 @@ export async function startBeeNode(
     endPromise = res
   })
 
-  const env = getEnv(name, mode) ?? {}
+  const env = {
+    ...(getEnv(name, mode) ?? {}),
+    ...envs,
+  }
 
   if (!worker) {
     delete env.BEE_BOOTNODE
