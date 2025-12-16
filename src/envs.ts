@@ -77,6 +77,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
     "etherna-index": {
       ...baseAspEnv,
       ASPNETCORE_URLS: indexUrl,
+      "Swarm:GatewayUrl": gatewayUrl,
       "SsoServer:BaseUrl": ssoUrl,
       "SsoServer:AllowUnsafeConnection": "true",
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
