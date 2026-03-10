@@ -1,6 +1,6 @@
 {
   "name": "@etherna/vite-plugin",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Vite plugin for Etherna services in Vite",
   "author": "Mattia Dalzocchio",
   "license": "LGPL-3.0-or-later",
@@ -31,7 +31,7 @@
     "typecheck": "pnpm tsc --noEmit"
   },
   "peerDependencies": {
-    "vite": ">=6"
+    "vite": ">=7"
   },
   "dependencies": {
     "node-forge": "1.3.1"
@@ -52,7 +52,7 @@
     "typescript-eslint": "8.46.3",
     "vite": "7.2.2"
   },
-  "packageManager": "pnpm@10.9.0+sha512.0486e394640d3c1fb3c9d43d49cf92879ff74f8516959c235308f5a8f62e2e19528a65cdc2a3058f587cde71eba3d5b56327c8c33a97e4c4051ca48a10ca2d5f",
+  "packageManager": "pnpm@10.26.0+sha512.3b3f6c725ebe712506c0ab1ad4133cf86b1f4b687effce62a9b38b4d72e3954242e643190fc51fa1642949c735f403debd44f5cb0edd657abe63a8b6a7e1e402",
   "engines": {
     "node": ">=22.0.0"
   }

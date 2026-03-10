@@ -212,7 +212,20 @@ export async function startAspContainer(
       /is only supported on replica sets./gm,
       /Failed to process the job/gm,
     ]
-    if (/Exception:.+/gm.test(text) && !excludedErrorRegexes.some((regex) => regex.test(text))) {
+    // Etherna ASP.NET apps use Serilog; default format: [HH:mm:ss INF] message
+    // Also support Microsoft formats (JSON, Simple, Systemd) for other apps
+    const nonErrorLogLevelRegexes = [
+      /\[(INF|WRN|DBG|VRB)\]/gm, // Serilog default {Level:u3}
+      /"LogLevel"\s*:\s*"(Trace|Debug|Information|Warning)"/gm, // Microsoft JSON
+      /\b(trce|dbug|info|warn):/gm, // Microsoft Simple
+      /<(4|6|7)>/gm, // Microsoft Systemd: <4>=Warning, <6>=Info, <7>=Trace/Debug
+    ]
+    const hasNonErrorLevel = nonErrorLogLevelRegexes.some((regex) => regex.test(text))
+    if (
+      !hasNonErrorLevel &&
+      /Exception:.+/gm.test(text) &&
+      !excludedErrorRegexes.some((regex) => regex.test(text))
+    ) {
       logError(name, text)
       endPromise?.()
     } else {
