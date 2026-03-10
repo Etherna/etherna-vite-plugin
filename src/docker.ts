@@ -213,15 +213,18 @@ export async function startAspContainer(
       /Failed to process the job/gm,
     ]
     // Etherna ASP.NET apps use Serilog; default format: [HH:mm:ss INF] message
-    // Also support Microsoft formats (JSON, Simple, Systemd) for other apps
-    const nonErrorLogLevelRegexes = [
-      /\[(INF|WRN|DBG|VRB)\]/gm, // Serilog default {Level:u3}
-      /"LogLevel"\s*:\s*"(Trace|Debug|Information|Warning)"/gm, // Microsoft JSON
-      /\b(trce|dbug|info|warn):/gm, // Microsoft Simple
-      /<(4|6|7)>/gm, // Microsoft Systemd: <4>=Warning, <6>=Info, <7>=Trace/Debug
+    // Require explicit error level - logs can arrive in chunks, so a chunk with
+    // Exception but no level may be the continuation of a [WRN] log
+    const errorLogLevelRegexes = [
+      /\[(ERR|FTL)\]/gm, // Serilog {Level:u3}
+      /"LogLevel"\s*:\s*"(Error|Critical)"/gm, // Microsoft JSON
+      /\b(fail|crit):/gm, // Microsoft Simple
+      /<(2|3)>/gm, // Microsoft Systemd: <2>=Critical, <3>=Error
     ]
-    const hasNonErrorLevel = nonErrorLogLevelRegexes.some((regex) => regex.test(text))
+    const hasErrorLevel = errorLogLevelRegexes.some((regex) => regex.test(text))
+    const hasNonErrorLevel = /\[(INF|WRN|DBG|VRB)\]/gm.test(text)
     if (
+      hasErrorLevel &&
       !hasNonErrorLevel &&
       /Exception:.+/gm.test(text) &&
       !excludedErrorRegexes.some((regex) => regex.test(text))
@@ -434,11 +437,13 @@ export async function startBeeNode(
     }
 
     const excludedErrorRegexes = [/\"logger\"=\"node\/storageincentives\"/gm]
-    if (/"level"="error"/gm.test(text) && !excludedErrorRegexes.some((regex) => regex.test(text))) {
-      logError(name, text)
+    // Bee uses "level"="error" format; filter to only error/critical lines (chunks can mix levels)
+    const errorLines = text.split("\n").filter((line) => /"level"="(error|critical)"/.test(line))
+    const errorText = errorLines.join("\n")
+    if (errorText && !excludedErrorRegexes.some((regex) => regex.test(text))) {
+      logError(name, errorText)
       endPromise?.()
-    } else {
-      lastLog = text
+      lastLog = errorText
     }
   }
 
