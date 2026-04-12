@@ -1,6 +1,7 @@
 import chalk from "chalk"
 
 import {
+  ensureDockerReady,
   startAspContainer,
   startBeeNodes,
   startBlockchain,
@@ -78,12 +79,14 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
       }
       config.server.port ??= getEnv("app", options.https ? "https" : "http").port
     },
-    configureServer(server) {
+    async configureServer(server) {
       // Early return when running in isolated mode or disabled
       if (options.enabled === false) {
         console.log(chalk.yellow(`  Services disabled. Skipping container startup.`))
         return
       }
+
+      await ensureDockerReady()
 
       const mode = options.https ? "https" : "http"
       // Start container once dev server is listening

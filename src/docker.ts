@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process"
 import fs from "node:fs"
+import chalk from "chalk"
 
 import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
 import { getEnv } from "./envs"
@@ -14,6 +15,107 @@ import {
 } from "./utils"
 
 const BEE_NETWORK_NAME = "etherna_bee_network"
+
+const DOCKER_GET_STARTED_URL = "https://docs.docker.com/get-docker/"
+const DOCKER_DAEMON_WAIT_MS = 120_000
+const DOCKER_DAEMON_POLL_MS = 2_000
+
+function spawnDetached(command: string, args: string[]) {
+  const proc = spawn(command, args, { detached: true, stdio: "ignore" })
+  proc.unref()
+}
+
+/** Resolves when `docker info` succeeds (daemon reachable). */
+function isDockerDaemonRunning(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn("docker", ["info"], { stdio: "ignore" })
+    proc.on("error", () => resolve(false))
+    proc.on("exit", (code) => resolve(code === 0))
+  })
+}
+
+/** True when the Docker CLI is on PATH and runs. */
+function isDockerCliInstalled(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn("docker", ["--version"], { stdio: "ignore" })
+    proc.on("error", () => resolve(false))
+    proc.on("exit", (code) => resolve(code === 0))
+  })
+}
+
+function tryStartDockerDaemon() {
+  const { platform } = process
+
+  if (platform === "darwin") {
+    spawnDetached("open", ["-a", "Docker"])
+    return
+  }
+
+  if (platform === "win32") {
+    const exe = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe"
+    if (fs.existsSync(exe)) {
+      spawnDetached(exe, [])
+      return
+    }
+    spawnDetached("cmd", ["/c", "start", "", "Docker Desktop"])
+    return
+  }
+
+  if (platform === "linux") {
+    spawnDetached("systemctl", ["--user", "start", "docker-desktop"])
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Verifies Docker CLI is installed, starts the daemon when possible, and waits until it responds.
+ * Exits the process on unrecoverable errors.
+ */
+export async function ensureDockerReady() {
+  const cliOk = await isDockerCliInstalled()
+  if (!cliOk) {
+    console.error(
+      `  ${chalk.red("x")}  ${chalk.bold("docker")}:   ${chalk.red("Docker is not installed or not on your PATH.")}`,
+    )
+    console.error(
+      `     Install Docker and try again: ${chalk.cyan.underline(DOCKER_GET_STARTED_URL)}`,
+    )
+    process.exit(1)
+  }
+
+  if (await isDockerDaemonRunning()) {
+    return
+  }
+
+  console.log(
+    `  ${chalk.yellow("➜")}  ${chalk.bold("docker")}:   ${chalk.yellow("Docker daemon is not running. Starting it…")}`,
+  )
+  tryStartDockerDaemon()
+
+  const deadline = Date.now() + DOCKER_DAEMON_WAIT_MS
+  while (Date.now() < deadline) {
+    await sleep(DOCKER_DAEMON_POLL_MS)
+    if (await isDockerDaemonRunning()) {
+      console.log(
+        `  ${chalk.green("➜")}  ${chalk.bold("docker")}:   ${chalk.green("Docker is ready.")}`,
+      )
+      return
+    }
+  }
+
+  console.error(
+    `  ${chalk.red("x")}  ${chalk.bold("docker")}:   ${chalk.red(
+      `Docker did not become ready within ${DOCKER_DAEMON_WAIT_MS / 1000}s. Start Docker manually and run the dev server again.`,
+    )}`,
+  )
+  console.error(
+    `     Install or troubleshoot: ${chalk.cyan.underline(DOCKER_GET_STARTED_URL)}`,
+  )
+  process.exit(1)
+}
 
 export async function startDockerContainer({
   containerName,
