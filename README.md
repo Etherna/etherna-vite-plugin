@@ -16,12 +16,12 @@ pnpm add @etherna/vite-plugin
 
 ### Prerequisites
 
-* Make sure [docker](https://www.docker.com/) is installed and running.
+- Make sure [docker](https://www.docker.com/) is installed and running.
 
 ```ts
 // vite.config.ts
-import { defineConfig } from 'vite'
-import { etherna } from '@etherna/vite-plugin'
+import { defineConfig } from "vite"
+import { etherna } from "@etherna/vite-plugin"
 
 export default defineConfig({
   plugins: [
@@ -58,7 +58,6 @@ export default defineConfig({
   }),
 // ...
 ```
-
 
 ### Disable all containers
 

@@ -3,7 +3,7 @@ import fs from "node:fs"
 import chalk from "chalk"
 
 import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
-import { getEnv } from "./envs"
+import { type AspServiceEnv, type BeeEnv, type ElasticEnv, getEnv, type MongoEnv } from "./envs"
 import { trustContainerCertificate } from "./ssl"
 import {
   getBeeUnderlayAddress,
@@ -111,9 +111,7 @@ export async function ensureDockerReady() {
       `Docker did not become ready within ${DOCKER_DAEMON_WAIT_MS / 1000}s. Start Docker manually and run the dev server again.`,
     )}`,
   )
-  console.error(
-    `     Install or troubleshoot: ${chalk.cyan.underline(DOCKER_GET_STARTED_URL)}`,
-  )
+  console.error(`     Install or troubleshoot: ${chalk.cyan.underline(DOCKER_GET_STARTED_URL)}`)
   process.exit(1)
 }
 
@@ -151,7 +149,7 @@ export async function startDockerContainer({
   return proc
 }
 
-export async function startMongoDbContainer(envs?: Record<string, string>) {
+export async function startMongoDbContainer(envs?: MongoEnv) {
   const name = "etherna-mongodb"
   const dbVolumeName = `etherna_${name}-db-volume`
   const configDbVolumeName = `etherna_${name}-configdb-volume`
@@ -210,7 +208,7 @@ export async function startMongoDbContainer(envs?: Record<string, string>) {
   return proc
 }
 
-export async function startElasticContainer(envs?: Record<string, string>) {
+export async function startElasticContainer(envs?: ElasticEnv) {
   const name = "elastic"
   const dataVolumeName = `etherna_${name}-data-volume`
   await createContainerVolume(dataVolumeName)
@@ -268,7 +266,7 @@ export async function startAspContainer(
   name: string,
   image: string,
   mode: "http" | "https",
-  envs?: Record<string, string>,
+  envs?: AspServiceEnv,
 ) {
   let endPromise = undefined as undefined | (() => void)
   const promise = new Promise<void>((res) => {
@@ -355,7 +353,7 @@ export async function startAspContainer(
   return proc
 }
 
-export async function startBlockchain(mode: "http" | "https", envs?: Record<string, string>) {
+export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
   const name = "etherna-blockchain"
   const volumeName = "etherna_blockchain-volume"
 
@@ -383,6 +381,8 @@ export async function startBlockchain(mode: "http" | "https", envs?: Record<stri
     ...envs,
   }
 
+  const blockchainPort = Number(env.BLOCKCHAIN_PORT)
+
   const proc = await startDockerContainer({
     containerName: name,
     imageName: "fairdatasociety/fdp-play-blockchain:latest",
@@ -391,9 +391,9 @@ export async function startBlockchain(mode: "http" | "https", envs?: Record<stri
       "--network",
       BEE_NETWORK_NAME,
       "-p",
-      `${env.BLOCKCHAIN_PORT}:${env.BLOCKCHAIN_PORT}`,
+      `${blockchainPort}:${blockchainPort}`,
       "-p",
-      `${env.BLOCKCHAIN_PORT + 1}:${env.BLOCKCHAIN_PORT + 1}`,
+      `${blockchainPort + 1}:${blockchainPort + 1}`,
       "--mount",
       `type=volume,source=${volumeName},target=/root/.ethereum`,
       "-v",
@@ -408,12 +408,12 @@ export async function startBlockchain(mode: "http" | "https", envs?: Record<stri
       "--http",
       '--http.api="debug,web3,eth,txpool,net,personal"',
       "--http.corsdomain=*",
-      `--http.port=${env.BLOCKCHAIN_PORT}`,
+      `--http.port=${blockchainPort}`,
       "--http.addr=0.0.0.0",
       "--http.vhosts=*",
       "--ws",
       '--ws.api="debug,web3,eth,txpool,net,personal"',
-      `--ws.port=${env.BLOCKCHAIN_PORT + 1}`,
+      `--ws.port=${blockchainPort + 1}`,
       "--ws.origins=*",
       "--maxpeers=0",
       `--networkid=${env.NETWORK_ID}`,
@@ -455,10 +455,7 @@ export async function startBlockchain(mode: "http" | "https", envs?: Record<stri
   return proc
 }
 
-export async function startBeeNodes(
-  mode: "http" | "https" = "http",
-  envs?: Record<string, string>,
-) {
+export async function startBeeNodes(mode: "http" | "https" = "http", envs?: BeeEnv) {
   const name = "etherna-bee"
 
   const queenProc = await startBeeNode(name, mode, undefined, undefined, envs)
@@ -481,7 +478,7 @@ export async function startBeeNode(
   mode: "http" | "https" = "http",
   worker?: 1 | 2 | 3 | 4,
   bootnode?: string,
-  envs?: Record<string, string>,
+  envs?: BeeEnv,
 ) {
   const volumeName = worker ? `etherna_bee_worker_${worker}-volume` : "etherna_bee-volume"
   await createContainerVolume(volumeName)
@@ -531,14 +528,14 @@ export async function startBeeNode(
     lastLog = undefined
 
     const text = String(data)
-    if (/"address"="\[\:\:\]\:\d+"/gm.test(text)) {
+    if (/"address"="\[::\]:\d+"/gm.test(text)) {
       if (!worker) {
         logSuccess(name, mode, env.BEE_PORT ?? "1633")
       }
       endPromise?.()
     }
 
-    const excludedErrorRegexes = [/\"logger\"=\"node\/storageincentives\"/gm]
+    const excludedErrorRegexes = [/"logger"="node\/storageincentives"/gm]
     // Bee uses "level"="error" format; filter to only error/critical lines (chunks can mix levels)
     const errorLines = text.split("\n").filter((line) => /"level"="(error|critical)"/.test(line))
     const errorText = errorLines.join("\n")

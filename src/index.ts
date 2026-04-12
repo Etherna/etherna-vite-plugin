@@ -8,28 +8,63 @@ import {
   startElasticContainer,
   startMongoDbContainer,
 } from "./docker"
-import { getEnv } from "./envs"
+import {
+  type BeeEnv,
+  type BeehiveEnv,
+  type CreditEnv,
+  type ElasticEnv,
+  type GatewayEnv,
+  type IndexEnv,
+  type MongoEnv,
+  type SsoEnv,
+  getEnv,
+} from "./envs"
+
+export type {
+  AspServiceEnv,
+  BeeEnv,
+  BeehiveEnv,
+  CreditEnv,
+  ElasticEnv,
+  GatewayEnv,
+  IndexEnv,
+  MongoEnv,
+  SsoEnv,
+} from "./envs"
 import { generateSslCertificate } from "./ssl"
 
 import type { ChildProcess } from "node:child_process"
 import type { Plugin, ServerOptions } from "vite"
 
-interface ServiceOptions {
-  enabled?: boolean
-  env?: Record<string, string>
+interface ServiceEnvByKey {
+  elastic: ElasticEnv
+  mongo: MongoEnv
+  bee: BeeEnv
+  sso: SsoEnv
+  index: IndexEnv
+  gateway: GatewayEnv
+  credit: CreditEnv
+  beehive: BeehiveEnv
 }
 
-interface DockerPluginOptions {
+export type ServiceKey = keyof ServiceEnvByKey
+
+interface ServiceConfig<TEnv> {
+  enabled?: boolean
+  env?: TEnv
+}
+
+export interface DockerPluginOptions {
   https?: boolean
   enabled?: boolean
-  elastic?: boolean | ServiceOptions
-  mongo?: boolean | ServiceOptions
-  bee?: boolean | ServiceOptions
-  sso?: boolean | ServiceOptions
-  index?: boolean | ServiceOptions
-  gateway?: boolean | ServiceOptions
-  credit?: boolean | ServiceOptions
-  beehive?: boolean | ServiceOptions
+  elastic?: boolean | ServiceConfig<ElasticEnv>
+  mongo?: boolean | ServiceConfig<MongoEnv>
+  bee?: boolean | ServiceConfig<BeeEnv>
+  sso?: boolean | ServiceConfig<SsoEnv>
+  index?: boolean | ServiceConfig<IndexEnv>
+  gateway?: boolean | ServiceConfig<GatewayEnv>
+  credit?: boolean | ServiceConfig<CreditEnv>
+  beehive?: boolean | ServiceConfig<BeehiveEnv>
 }
 
 export function etherna(options: DockerPluginOptions = {}): Plugin {
@@ -47,14 +82,15 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     }
   }
 
-  const isServiceEnabled = (service: keyof DockerPluginOptions) => {
+  const isServiceEnabled = (service: ServiceKey) => {
     return typeof options[service] === "object"
       ? options[service]?.enabled !== false
       : options[service] !== false
   }
 
-  const getServiceEnv = (service: keyof DockerPluginOptions) => {
-    return typeof options[service] === "object" ? options[service]?.env : {}
+  const getServiceEnv = <K extends ServiceKey>(service: K): ServiceEnvByKey[K] => {
+    const o = options[service]
+    return typeof o === "object" && o !== null ? (o.env ?? {}) : {}
   }
 
   process.once("SIGINT", () => {

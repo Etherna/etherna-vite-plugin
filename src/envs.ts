@@ -23,7 +23,15 @@ const GATEWAY_HTTPS_PORT = 42640
 
 const BEEHIVE_HTTP_PORT = 12610
 
-export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
+type UnionToIntersection<Union> = (
+  Union extends unknown ? (distributedUnion: Union) => void : never
+) extends (mergedIntersection: infer Intersection) => void
+  ? Intersection & Union
+  : never
+
+type StringEnvOverride<T extends Record<string, string | number>> = Partial<Record<keyof T, string>>
+
+export function buildServiceEnvs(mode: "http" | "https") {
   const appPort = mode === "http" ? APP_PORT : APP_HTTPS_PORT
   const ssoPort = mode === "http" ? SSO_HTTP_PORT : SSO_HTTPS_PORT
   const indexPort = mode === "http" ? INDEX_HTTP_PORT : INDEX_HTTPS_PORT
@@ -60,6 +68,7 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
       "xpack.security.enabled": "false",
       ES_JAVA_OPTS: "-Xms512m -Xmx512m",
     },
+    "etherna-mongodb": {},
     "etherna-sso": {
       ...baseAspEnv,
       ASPNETCORE_URLS: ssoUrl,
@@ -156,14 +165,29 @@ export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
     },
   } satisfies Record<string, Record<string, string | number>>
 
-  type UnionToIntersection<Union> = (
-    Union extends unknown ? (distributedUnion: Union) => void : never
-  ) extends (mergedIntersection: infer Intersection) => void
-    ? Intersection & Union
-    : never
+  return envs
+}
+
+export type BuiltServiceEnvs = ReturnType<typeof buildServiceEnvs>
+
+export type ElasticEnv = StringEnvOverride<BuiltServiceEnvs["elastic"]>
+export type MongoEnv = StringEnvOverride<BuiltServiceEnvs["etherna-mongodb"]>
+export type BeeEnv = StringEnvOverride<
+  BuiltServiceEnvs["etherna-blockchain"] & BuiltServiceEnvs["etherna-bee"]
+>
+export type SsoEnv = StringEnvOverride<BuiltServiceEnvs["etherna-sso"]>
+export type IndexEnv = StringEnvOverride<BuiltServiceEnvs["etherna-index"]>
+export type GatewayEnv = StringEnvOverride<BuiltServiceEnvs["etherna-gateway"]>
+export type CreditEnv = StringEnvOverride<BuiltServiceEnvs["etherna-credit"]>
+export type BeehiveEnv = StringEnvOverride<BuiltServiceEnvs["etherna-beehive-manager"]>
+
+/** Union of env overrides accepted by ASP.NET Etherna containers (SSO, Index, Gateway, Credit, Beehive). */
+export type AspServiceEnv = SsoEnv | IndexEnv | GatewayEnv | CreditEnv | BeehiveEnv
+
+export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
+  const envs = buildServiceEnvs(mode)
   type Env = typeof envs
   type AnyEnv = UnionToIntersection<Env[keyof Env]>
-
   type AnyEnvKey = keyof AnyEnv
 
   return ((envs as Record<string, unknown>)[name] ?? null) as T extends keyof Env

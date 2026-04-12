@@ -1,9 +1,7 @@
 // CREDITS: https://github.com/vitejs/vite-plugin-basic-ssl/blob/main/src/certificate.ts
 
 import forge from "node-forge"
-
 import "node-forge/lib/pki"
-
 import { CERTIFICATE_PASSWORD } from "./consts"
 
 createCertificate()
@@ -119,7 +117,7 @@ export function createCertificate(name = "localhost", otherDomains: string[] = [
     keyPair.privateKey,
     [cert],
     CERTIFICATE_PASSWORD,
-    { algorithm: "3des" } // optional, you can also use 'aes256', etc.
+    { algorithm: "3des" }, // optional, you can also use 'aes256', etc.
   )
   const p12Der = forge.asn1.toDer(p12Asn1).getBytes()
 
