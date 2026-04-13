@@ -29,7 +29,8 @@
     "lint": "pnpm oxlint",
     "format": "opnpm xfmt",
     "format:check": "pnpm oxfmt --check",
-    "typecheck": "pnpm tsc --noEmit"
+    "typecheck": "pnpm tsc --noEmit",
+    "test": "pnpm vitest run"
   },
   "peerDependencies": {
     "vite": "^7.0.0 || ^8.0.0"
@@ -45,9 +46,11 @@
     "oxfmt": "0.44.0",
     "oxlint": "1.59.0",
     "oxlint-tsgolint": "0.20.0",
+    "portless": "0.10.1",
     "tsup": "8.5.1",
     "typescript": "6.0.2",
-    "vite": "8.0.8"
+    "vite": "8.0.8",
+    "vitest": "3.2.4"
   },
   "packageManager": "pnpm@10.26.0+sha512.3b3f6c725ebe712506c0ab1ad4133cf86b1f4b687effce62a9b38b4d72e3954242e643190fc51fa1642949c735f403debd44f5cb0edd657abe63a8b6a7e1e402",
   "engines": {

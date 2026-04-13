@@ -14,7 +14,20 @@ export function resolvePathEscape(...paths: string[]) {
   return resolvePath(...paths).replace(/:/g, "/")
 }
 
-export function logSuccess(containerName: string, protocol: string, port: string) {
+export function logSuccess(
+  containerName: string,
+  protocol: string,
+  port: string,
+  options?: { portlessUrl?: string },
+) {
+  if (options?.portlessUrl) {
+    const friendly = `${options.portlessUrl.replace(/\/$/, "")}/`
+    const raw = `${protocol}://localhost:${port}/`
+    console.log(
+      `  ${chalk.green("➜")}  ${chalk.bold(containerName)}:   ${chalk.cyan(friendly)} ${chalk.gray(`(${raw})`)}`,
+    )
+    return
+  }
   const url = `${protocol}://localhost:${chalk.bold.cyanBright(port)}/`
   console.log(`  ${chalk.green("➜")}  ${chalk.bold(containerName)}:   ${chalk.cyan(url)}`)
 }

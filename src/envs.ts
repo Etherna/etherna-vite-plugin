@@ -1,6 +1,7 @@
 import { CERTIFICATE_PASSWORD, CERTIFICATE_PFX_NAME, CONTAINER_CERTS_DIR } from "./consts"
+import { getPortlessPublicUrl, type PortlessServiceAlias } from "./portless"
 
-const APP_PORT = 5173
+export const APP_PORT = 5173
 const APP_HTTPS_PORT = 5371
 
 const MONGODB_PORT = 27017
@@ -31,22 +32,74 @@ type UnionToIntersection<Union> = (
 
 type StringEnvOverride<T extends Record<string, string | number>> = Partial<Record<keyof T, string>>
 
-export function buildServiceEnvs(mode: "http" | "https") {
-  const appPort = mode === "http" ? APP_PORT : APP_HTTPS_PORT
+/** Runtime context for building service envs (bind URLs vs public Portless URLs). */
+export interface ServiceEnvBuildContext {
+  mode: "http" | "https"
+  portless: boolean
+  /** Actual Vite dev server port (may differ from {@link APP_PORT}). */
+  appPort: number
+}
+
+export function defaultServiceEnvBuildContext(mode: "http" | "https"): ServiceEnvBuildContext {
+  return {
+    mode,
+    portless: false,
+    appPort: mode === "http" ? APP_PORT : APP_HTTPS_PORT,
+  }
+}
+
+/** Parses the listen port from `ASPNETCORE_URLS` (first URL if semicolon-separated). */
+export function parsePortFromAspNetCoreUrls(bindUrls: string): string {
+  const first = bindUrls.split(";")[0]?.trim() ?? ""
+  try {
+    const u = new URL(first)
+    if (u.port) {
+      return u.port
+    }
+    return u.protocol === "https:" ? "443" : "80"
+  } catch {
+    return first.split(":")[2] ?? "80"
+  }
+}
+
+function bindUrl(mode: "http" | "https", port: number): string {
+  return `${mode}://localhost:${port}`
+}
+
+function publicHttpUrl(
+  mode: "http" | "https",
+  port: number,
+  portless: boolean,
+  alias: PortlessServiceAlias,
+): string {
+  if (portless) {
+    return getPortlessPublicUrl(alias)
+  }
+  return bindUrl(mode, port)
+}
+
+export function buildServiceEnvs(context: ServiceEnvBuildContext) {
+  const { mode, portless, appPort } = context
+
   const ssoPort = mode === "http" ? SSO_HTTP_PORT : SSO_HTTPS_PORT
   const indexPort = mode === "http" ? INDEX_HTTP_PORT : INDEX_HTTPS_PORT
   const creditPort = mode === "http" ? CREDIT_HTTP_PORT : CREDIT_HTTPS_PORT
   const gatewayPort = mode === "http" ? GATEWAY_HTTP_PORT : GATEWAY_HTTPS_PORT
   const beehivePort = BEEHIVE_HTTP_PORT
 
-  const appUrl = `${mode}://localhost:${appPort}`
   const mongodbUrl = `mongodb://localhost:${MONGODB_PORT}`
-  const ssoUrl = `${mode}://localhost:${ssoPort}`
-  const indexUrl = `${mode}://localhost:${indexPort}`
-  const creditUrl = `${mode}://localhost:${creditPort}`
-  const gatewayUrl = `${mode}://localhost:${gatewayPort}`
-  const beehiveUrl = `${mode}://localhost:${beehivePort}`
-  const beeUrl = `http://localhost:${BEE_PORT}`
+  const ssoBindUrl = bindUrl(mode, ssoPort)
+  const indexBindUrl = bindUrl(mode, indexPort)
+  const creditBindUrl = bindUrl(mode, creditPort)
+  const gatewayBindUrl = bindUrl(mode, gatewayPort)
+  const beehiveBindUrl = bindUrl(mode, beehivePort)
+  /** Direct Bee API URL for container-to-container calls (always `localhost`; `*.localhost` Portless hosts often do not resolve inside Docker). */
+  const beeApiBindUrl = `http://localhost:${BEE_PORT}`
+
+  const appPublicUrl = publicHttpUrl(mode, appPort, portless, "app")
+  const indexPublicUrl = publicHttpUrl(mode, indexPort, portless, "index")
+  const creditPublicUrl = publicHttpUrl(mode, creditPort, portless, "credit")
+  const gatewayPublicUrl = publicHttpUrl(mode, gatewayPort, portless, "gateway")
 
   const baseAspEnv = {
     ASPNETCORE_ENVIRONMENT: "Development",
@@ -71,13 +124,14 @@ export function buildServiceEnvs(mode: "http" | "https") {
     "etherna-mongodb": {},
     "etherna-sso": {
       ...baseAspEnv,
-      ASPNETCORE_URLS: ssoUrl,
-      "IdServer:SsoServer:BaseUrl": ssoUrl,
+      ASPNETCORE_URLS: ssoBindUrl,
+      /** Issuer/authority for discovery; keep bind URL so services and DNS inside containers resolve it. */
+      "IdServer:SsoServer:BaseUrl": ssoBindUrl,
       "IdServer:SsoServer:AllowUnsafeConnection": "true",
-      "IdServer:Clients:EthernaCredit:BaseUrl": creditUrl,
-      "IdServer:Clients:EthernaGateway:BaseUrls:0": gatewayUrl,
-      "IdServer:Clients:EthernaIndex:BaseUrl": indexUrl,
-      "IdServer:Clients:EthernaDapp:BaseUrl": appUrl,
+      "IdServer:Clients:EthernaCredit:BaseUrl": creditPublicUrl,
+      "IdServer:Clients:EthernaGateway:BaseUrls:0": gatewayPublicUrl,
+      "IdServer:Clients:EthernaIndex:BaseUrl": indexPublicUrl,
+      "IdServer:Clients:EthernaDapp:BaseUrl": appPublicUrl,
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSSODataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaSSOHangfireDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
@@ -85,9 +139,10 @@ export function buildServiceEnvs(mode: "http" | "https") {
     },
     "etherna-index": {
       ...baseAspEnv,
-      ASPNETCORE_URLS: indexUrl,
-      "Swarm:GatewayUrl": gatewayUrl,
-      "SsoServer:BaseUrl": ssoUrl,
+      ASPNETCORE_URLS: indexBindUrl,
+      "Swarm:GatewayUrl": gatewayBindUrl,
+      /** Server-side HTTP to SSO/Gateway must use bind URLs; `*.localhost` Portless names often fail in containers. */
+      "SsoServer:BaseUrl": ssoBindUrl,
       "SsoServer:AllowUnsafeConnection": "true",
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaIndexHangfireDev`,
@@ -96,8 +151,8 @@ export function buildServiceEnvs(mode: "http" | "https") {
     },
     "etherna-credit": {
       ...baseAspEnv,
-      ASPNETCORE_URLS: creditUrl,
-      "SsoServer:BaseUrl": ssoUrl,
+      ASPNETCORE_URLS: creditBindUrl,
+      "SsoServer:BaseUrl": ssoBindUrl,
       "SsoServer:AllowUnsafeConnection": "true",
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaCreditHangfireDev`,
@@ -106,16 +161,15 @@ export function buildServiceEnvs(mode: "http" | "https") {
     },
     "etherna-gateway": {
       ...baseAspEnv,
-      ASPNETCORE_URLS: gatewayUrl,
+      ASPNETCORE_URLS: gatewayBindUrl,
       "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
-      "SsoServer:BaseUrl": ssoUrl,
-      "SsoServer:Clients:Credit:BaseUrl": creditUrl,
+      "SsoServer:BaseUrl": ssoBindUrl,
+      "SsoServer:Clients:Credit:BaseUrl": creditPublicUrl,
       "SsoServer:Clients:Credit:Secret": "ethernaGatewayCreditClientSecret",
       "SsoServer:Clients:Webapp:Secret": "ethernaGatewayWebappClientSecret",
       "SsoServer:AllowUnsafeConnection": "true",
-      // "BeehiveManager:Url": beehiveUrl,
-      "Bee:CachedUrl": beehiveUrl,
-      "Bee:DirectUrl": beehiveUrl,
+      "Bee:CachedUrl": beehiveBindUrl,
+      "Bee:DirectUrl": beehiveBindUrl,
       "Features:GarbageCollectPins": "false",
       ForwardedAllowedHosts: "*",
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSharedDataProtectionDev`,
@@ -125,12 +179,12 @@ export function buildServiceEnvs(mode: "http" | "https") {
     },
     "etherna-beehive-manager": {
       ...baseAspEnv,
-      ASPNETCORE_URLS: beehiveUrl,
+      ASPNETCORE_URLS: beehiveBindUrl,
       "SeedDb:BeeNodes:0:Hostname": "localhost",
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/beehiveDataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/beehiveHangfireDev`,
       "ConnectionStrings:BeehiveDb": `${mongodbUrl}/beehiveDev`,
-      "SeedDb:BeeNodes:0:ConnectionString": beeUrl,
+      "SeedDb:BeeNodes:0:ConnectionString": beeApiBindUrl,
       "SeedDb:BeeNodes:0:EnableBatchCreation": "true",
     },
     "etherna-blockchain": {
@@ -184,8 +238,8 @@ export type BeehiveEnv = StringEnvOverride<BuiltServiceEnvs["etherna-beehive-man
 /** Union of env overrides accepted by ASP.NET Etherna containers (SSO, Index, Gateway, Credit, Beehive). */
 export type AspServiceEnv = SsoEnv | IndexEnv | GatewayEnv | CreditEnv | BeehiveEnv
 
-export const getEnv = <T extends string>(name: T, mode: "http" | "https") => {
-  const envs = buildServiceEnvs(mode)
+export const getEnv = <T extends string>(name: T, context: ServiceEnvBuildContext) => {
+  const envs = buildServiceEnvs(context)
   type Env = typeof envs
   type AnyEnv = UnionToIntersection<Env[keyof Env]>
   type AnyEnvKey = keyof AnyEnv

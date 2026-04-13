@@ -8,6 +8,7 @@ export default defineConfig({
   },
   plugins: [
     etherna({
+      portless: true,
       mongo: true,
       elastic: true,
       bee: true,

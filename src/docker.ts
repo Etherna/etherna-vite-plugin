@@ -3,7 +3,8 @@ import fs from "node:fs"
 import chalk from "chalk"
 
 import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
-import { type AspServiceEnv, type BeeEnv, type ElasticEnv, getEnv, type MongoEnv } from "./envs"
+import { defaultServiceEnvBuildContext, getEnv } from "./envs"
+import { getPortlessPublicUrl, PORTLESS_CONTAINER_ALIASES } from "./portless"
 import { trustContainerCertificate } from "./ssl"
 import {
   getBeeUnderlayAddress,
@@ -14,11 +15,54 @@ import {
   resolvePathEscape,
 } from "./utils"
 
+import type { AspServiceEnv, BeeEnv, ElasticEnv, MongoEnv, ServiceEnvBuildContext } from "./envs"
+
 const BEE_NETWORK_NAME = "etherna_bee_network"
 
 const DOCKER_GET_STARTED_URL = "https://docs.docker.com/get-docker/"
-const DOCKER_DAEMON_WAIT_MS = 120_000
+const DOCKER_DAEMON_WAIT_MS = 30_000
 const DOCKER_DAEMON_POLL_MS = 2_000
+const BEE_CONTRACT_DEPLOY_WAIT_MS = 30_000
+const BEE_CONTRACT_DEPLOY_POLL_MS = 1_000
+const BEE_CORRUPTED_CHAIN_BLOCK_THRESHOLD = 10
+const BEE_CORRUPTED_CHAIN_PROGRESS_BLOCKS = 2
+
+const BEE_REQUIRED_CONTRACT_ENV_KEYS = [
+  "BEE_SWAP_FACTORY_ADDRESS",
+  "BEE_POSTAGE_STAMP_ADDRESS",
+  "BEE_PRICE_ORACLE_ADDRESS",
+  "BEE_REDISTRIBUTION_ADDRESS",
+  "BEE_STAKING_ADDRESS",
+] as const
+
+let blockchainBootstrapInProgress = false
+let resolveBlockchainBootstrapSettle = undefined as undefined | (() => void)
+let blockchainBootstrapSettlePromise = Promise.resolve()
+
+function beginBlockchainBootstrap() {
+  blockchainBootstrapInProgress = true
+  blockchainBootstrapSettlePromise = new Promise<void>((resolve) => {
+    resolveBlockchainBootstrapSettle = resolve
+  })
+}
+
+function settleBlockchainBootstrap() {
+  if (!blockchainBootstrapInProgress) {
+    return
+  }
+
+  blockchainBootstrapInProgress = false
+  resolveBlockchainBootstrapSettle?.()
+  resolveBlockchainBootstrapSettle = undefined
+}
+
+export function isBlockchainBootstrapInProgress() {
+  return blockchainBootstrapInProgress
+}
+
+export function waitForBlockchainBootstrapToSettle() {
+  return blockchainBootstrapSettlePromise
+}
 
 function spawnDetached(command: string, args: string[]) {
   const proc = spawn(command, args, { detached: true, stdio: "ignore" })
@@ -68,6 +112,116 @@ function tryStartDockerDaemon() {
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+async function getEthereumCode(rpcUrl: string, address: string) {
+  const resp = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getCode",
+      params: [address, "latest"],
+    }),
+  })
+
+  if (!resp.ok) {
+    throw new Error(`Failed to query contract code: ${resp.status} ${resp.statusText}`)
+  }
+
+  const data = (await resp.json()) as {
+    error?: { message?: string }
+    result?: string
+  }
+
+  if (data.error?.message) {
+    throw new Error(data.error.message)
+  }
+
+  return data.result ?? "0x"
+}
+
+async function getEthereumBlockNumber(rpcUrl: string) {
+  const resp = await fetch(rpcUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_blockNumber",
+      params: [],
+    }),
+  })
+
+  if (!resp.ok) {
+    throw new Error(`Failed to query block number: ${resp.status} ${resp.statusText}`)
+  }
+
+  const data = (await resp.json()) as {
+    error?: { message?: string }
+    result?: string
+  }
+
+  if (data.error?.message) {
+    throw new Error(data.error.message)
+  }
+
+  return Number.parseInt(data.result ?? "0x0", 16)
+}
+
+function isEthereumCodeDeployed(code: string) {
+  return code !== "0x" && code.length > 2
+}
+
+function createCorruptedBlockchainError(volumeName: string) {
+  return new Error(
+    [
+      "Detected a stale or corrupted local blockchain state: Bee contracts are still missing even though the chain has already advanced.",
+      "Fix it by stopping the dev server, removing the persisted blockchain volume, and starting again:",
+      `1. Stop the dev server`,
+      `2. Run: docker volume rm ${volumeName}`,
+      `3. Run: pnpm dev`,
+    ].join("\n"),
+  )
+}
+
+async function waitForBeeContracts(rpcUrl: string, addresses: string[], volumeName: string) {
+  const deadline = Date.now() + BEE_CONTRACT_DEPLOY_WAIT_MS
+  let firstObservedBlock: number | null = null
+
+  while (Date.now() < deadline) {
+    const [blockNumber, codes] = await Promise.all([
+      getEthereumBlockNumber(rpcUrl),
+      Promise.all(addresses.map((address) => getEthereumCode(rpcUrl, address))),
+    ])
+
+    if (firstObservedBlock === null) {
+      firstObservedBlock = blockNumber
+    }
+
+    if (codes.every((code) => isEthereumCodeDeployed(code))) {
+      return
+    }
+
+    const blockchainLooksCorrupted =
+      blockNumber >= BEE_CORRUPTED_CHAIN_BLOCK_THRESHOLD ||
+      blockNumber - firstObservedBlock >= BEE_CORRUPTED_CHAIN_PROGRESS_BLOCKS
+
+    if (blockchainLooksCorrupted) {
+      throw createCorruptedBlockchainError(volumeName)
+    }
+
+    await sleep(BEE_CONTRACT_DEPLOY_POLL_MS)
+  }
+
+  throw new Error(
+    `Bee contracts were not deployed before the startup timeout elapsed. If this keeps happening, stop the dev server, run \`docker volume rm ${volumeName}\`, and start again.`,
+  )
 }
 
 /**
@@ -149,7 +303,7 @@ export async function startDockerContainer({
   return proc
 }
 
-export async function startMongoDbContainer(envs?: MongoEnv) {
+export async function startMongoDbContainer(envs?: MongoEnv, context?: ServiceEnvBuildContext) {
   const name = "etherna-mongodb"
   const dbVolumeName = `etherna_${name}-db-volume`
   const configDbVolumeName = `etherna_${name}-configdb-volume`
@@ -163,8 +317,9 @@ export async function startMongoDbContainer(envs?: MongoEnv) {
     endPromise = res
   })
 
+  const ctx = context ?? defaultServiceEnvBuildContext("http")
   const env = {
-    ...(getEnv(name, "http") ?? {}),
+    ...(getEnv(name, ctx) ?? {}),
     ...envs,
   }
 
@@ -208,7 +363,7 @@ export async function startMongoDbContainer(envs?: MongoEnv) {
   return proc
 }
 
-export async function startElasticContainer(envs?: ElasticEnv) {
+export async function startElasticContainer(envs?: ElasticEnv, context?: ServiceEnvBuildContext) {
   const name = "elastic"
   const dataVolumeName = `etherna_${name}-data-volume`
   await createContainerVolume(dataVolumeName)
@@ -218,8 +373,9 @@ export async function startElasticContainer(envs?: ElasticEnv) {
     endPromise = res
   })
 
+  const ctx = context ?? defaultServiceEnvBuildContext("http")
   const env = {
-    ...(getEnv(name, "http") ?? {}),
+    ...(getEnv(name, ctx) ?? {}),
     ...envs,
   }
 
@@ -265,7 +421,7 @@ export async function startElasticContainer(envs?: ElasticEnv) {
 export async function startAspContainer(
   name: string,
   image: string,
-  mode: "http" | "https",
+  context: ServiceEnvBuildContext,
   envs?: AspServiceEnv,
 ) {
   let endPromise = undefined as undefined | (() => void)
@@ -275,11 +431,15 @@ export async function startAspContainer(
 
   let lastLog: string | undefined = undefined
 
+  const { mode } = context
   const env = {
-    ...(getEnv(name as "etherna-sso", mode) ?? {}),
+    ...(getEnv(name as "etherna-sso", context) ?? {}),
     ...envs,
   }
   const port = env.ASPNETCORE_URLS.split(";")[0]?.split(":")[2] ?? "80"
+
+  const alias = PORTLESS_CONTAINER_ALIASES[name]
+  const portlessUrl = context.portless && alias ? getPortlessPublicUrl(alias) : undefined
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -303,7 +463,7 @@ export async function startAspContainer(
       if (mode === "https") {
         await trustContainerCertificate(name)
       }
-      logSuccess(name, mode, port)
+      logSuccess(name, mode, port, { portlessUrl })
       endPromise?.()
     }
 
@@ -353,18 +513,23 @@ export async function startAspContainer(
   return proc
 }
 
-export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
+export async function startBlockchain(context: ServiceEnvBuildContext, envs?: BeeEnv) {
   const name = "etherna-blockchain"
   const volumeName = "etherna_blockchain-volume"
 
+  beginBlockchainBootstrap()
   await createNetwork(BEE_NETWORK_NAME)
   await createContainerVolume(volumeName)
 
   let lastLog: string | undefined = undefined
   let endPromise = undefined as undefined | (() => void)
-  const promise = new Promise<void>((res) => {
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
     endPromise = res
+    rejectPromise = rej
   })
+  let readinessCheckStarted = false
+  let startupSettled = false
 
   if (!fs.existsSync(resolvePath(".ethereum"))) {
     fs.mkdirSync(resolvePath(".ethereum"), { recursive: true, mode: 0o777 })
@@ -377,11 +542,16 @@ export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
   }
 
   const env = {
-    ...(getEnv(name, mode) ?? {}),
+    ...(getEnv(name, context) ?? {}),
+    ...envs,
+  }
+  const beeEnv = {
+    ...(getEnv("etherna-bee", context) ?? {}),
     ...envs,
   }
 
   const blockchainPort = Number(env.BLOCKCHAIN_PORT)
+  const beeContractAddresses = BEE_REQUIRED_CONTRACT_ENV_KEYS.map((key) => String(beeEnv[key]))
 
   const proc = await startDockerContainer({
     containerName: name,
@@ -426,8 +596,23 @@ export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
     lastLog = undefined
 
     const text = String(data)
-    if (/HTTP server started/gm.test(text)) {
-      endPromise?.()
+    if (!readinessCheckStarted && /HTTP server started/gm.test(text)) {
+      readinessCheckStarted = true
+      void waitForBeeContracts(`http://127.0.0.1:${blockchainPort}`, beeContractAddresses, volumeName)
+        .then(() => {
+          startupSettled = true
+          settleBlockchainBootstrap()
+          endPromise?.()
+        })
+        .catch((error: unknown) => {
+          startupSettled = true
+          settleBlockchainBootstrap()
+          const message = error instanceof Error ? error.message : String(error)
+          logError(name, message)
+          void stopContainer(name).finally(() => {
+            rejectPromise?.(error)
+          })
+        })
     }
 
     if (/Error:.+/gm.test(text)) {
@@ -440,13 +625,17 @@ export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
 
   proc.stdout.on("data", handleStdData)
   proc.stdout.on("error", (error) => {
+    settleBlockchainBootstrap()
     logError(name, "FATAL: " + error.message)
     endPromise?.()
   })
   proc.stderr.on("data", handleStdData)
   proc.on("close", (code) => {
-    logError(name, lastLog || `Container closed with code ${code}`)
-    endPromise?.()
+    settleBlockchainBootstrap()
+    if (!startupSettled) {
+      logError(name, lastLog || `Container closed with code ${code}`)
+      endPromise?.()
+    }
     proc.kill()
   })
 
@@ -455,17 +644,17 @@ export async function startBlockchain(mode: "http" | "https", envs?: BeeEnv) {
   return proc
 }
 
-export async function startBeeNodes(mode: "http" | "https" = "http", envs?: BeeEnv) {
+export async function startBeeNodes(context: ServiceEnvBuildContext, envs?: BeeEnv) {
   const name = "etherna-bee"
 
-  const queenProc = await startBeeNode(name, mode, undefined, undefined, envs)
+  const queenProc = await startBeeNode(name, context, undefined, undefined, envs)
 
   const bootnode = await getBeeUnderlayAddress(
-    `http://localhost:${getEnv("etherna-bee", mode)?.BEE_PORT ?? "1633"}`,
+    `http://localhost:${getEnv("etherna-bee", context)?.BEE_PORT ?? "1633"}`,
   )
 
   const [worker1Proc] = await Promise.all([
-    startBeeNode(name, mode, 1, bootnode, envs),
+    startBeeNode(name, context, 1, bootnode, envs),
     // startBeeNode(name, mode, 2, bootnode, envs),
     // startBeeNode(name, mode, 3, bootnode, envs),
     // startBeeNode(name, mode, 4, bootnode, envs),
@@ -475,7 +664,7 @@ export async function startBeeNodes(mode: "http" | "https" = "http", envs?: BeeE
 
 export async function startBeeNode(
   name: string,
-  mode: "http" | "https" = "http",
+  context: ServiceEnvBuildContext,
   worker?: 1 | 2 | 3 | 4,
   bootnode?: string,
   envs?: BeeEnv,
@@ -489,8 +678,9 @@ export async function startBeeNode(
     endPromise = res
   })
 
+  const { mode } = context
   const env = {
-    ...(getEnv(name, mode) ?? {}),
+    ...(getEnv(name, context) ?? {}),
     ...envs,
   }
 
@@ -530,7 +720,8 @@ export async function startBeeNode(
     const text = String(data)
     if (/"address"="\[::\]:\d+"/gm.test(text)) {
       if (!worker) {
-        logSuccess(name, mode, env.BEE_PORT ?? "1633")
+        const portlessUrl = context.portless ? getPortlessPublicUrl("bee") : undefined
+        logSuccess(name, mode, String(env.BEE_PORT ?? "1633"), { portlessUrl })
       }
       endPromise?.()
     }
@@ -563,14 +754,14 @@ export async function startBeeNode(
   return proc
 }
 
-export async function startInterceptor(name: string, _mode: "http" | "https") {
+export async function startInterceptor(name: string, context: ServiceEnvBuildContext) {
   let lastLog: string | undefined = undefined
   let endPromise = undefined as undefined | (() => void)
   const promise = new Promise<void>((res) => {
     endPromise = res
   })
 
-  const env = getEnv(name, "http") ?? {}
+  const env = getEnv(name, context) ?? {}
 
   const proc = await startDockerContainer({
     containerName: name,
