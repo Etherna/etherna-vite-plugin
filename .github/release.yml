@@ -1,0 +1,25 @@
+# Configures automatically generated release notes (see workflow create-release job).
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes#configuring-automatically-generated-release-notes
+
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - skip-changelog
+  categories:
+    - title: Breaking changes
+      labels:
+        - breaking
+        - semver-major
+    - title: New features
+      labels:
+        - enhancement
+        - feature
+    - title: Bug fixes
+      labels:
+        - bug
+        - fix
+    - title: Dependencies
+      labels:
+        - dependencies
+        - dependabot
