@@ -19,6 +19,18 @@ describe("buildServiceEnvs", () => {
     expect(envs["etherna-gateway"].ASPNETCORE_URLS).toBe("http://localhost:32640")
   })
 
+  it("uses PORTLESS_URL override for dapp client base URL when portlessAppPublicUrl is set", () => {
+    const envs = buildServiceEnvs({
+      mode: "http",
+      portless: true,
+      appPort: 9999,
+      portlessAppPublicUrl: "http://dapp.etherna.localhost:1355/",
+    })
+    expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe(
+      "http://dapp.etherna.localhost:1355",
+    )
+  })
+
   it("uses portless only for browser-facing client base URLs when portless is on", () => {
     const envs = buildServiceEnvs({ mode: "http", portless: true, appPort: 9999 })
     expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe("http://app.localhost:1355")

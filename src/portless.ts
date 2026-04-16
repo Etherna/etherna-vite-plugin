@@ -25,6 +25,14 @@ export function getPortlessPublicUrl(alias: PortlessServiceAlias): string {
   return `http://${alias}.localhost:${PORTLESS_PROXY_PORT}`
 }
 
+/** Env name set by the Portless CLI when it wraps your dev process (public URL for the app). */
+export const PORTLESS_URL_ENV = "PORTLESS_URL"
+
+/** Normalizes a base URL for OAuth/client env (trim, strip trailing slashes). */
+export function normalizePortlessAppPublicUrl(url: string): string {
+  return url.trim().replace(/\/+$/, "")
+}
+
 export function portlessProxyStartArgs(): string[] {
   return ["proxy", "start", "-p", String(PORTLESS_PROXY_PORT), "--no-tls"]
 }

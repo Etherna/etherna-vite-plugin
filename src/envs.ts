@@ -1,5 +1,9 @@
 import { CERTIFICATE_PASSWORD, CERTIFICATE_PFX_NAME, CONTAINER_CERTS_DIR } from "./consts"
-import { getPortlessPublicUrl, type PortlessServiceAlias } from "./portless"
+import {
+  getPortlessPublicUrl,
+  normalizePortlessAppPublicUrl,
+  type PortlessServiceAlias,
+} from "./portless"
 
 export const APP_PORT = 5173
 const APP_HTTPS_PORT = 5371
@@ -38,6 +42,11 @@ export interface ServiceEnvBuildContext {
   portless: boolean
   /** Actual Vite dev server port (may differ from {@link APP_PORT}). */
   appPort: number
+  /**
+   * When set (e.g. `PORTLESS_URL` from the Portless CLI), used as the browser-facing dapp base URL
+   * instead of `http://app.localhost:1355`. The plugin skips registering the `app` Portless alias.
+   */
+  portlessAppPublicUrl?: string
 }
 
 export function defaultServiceEnvBuildContext(mode: "http" | "https"): ServiceEnvBuildContext {
@@ -79,7 +88,7 @@ function publicHttpUrl(
 }
 
 export function buildServiceEnvs(context: ServiceEnvBuildContext) {
-  const { mode, portless, appPort } = context
+  const { mode, portless, appPort, portlessAppPublicUrl } = context
 
   const ssoPort = mode === "http" ? SSO_HTTP_PORT : SSO_HTTPS_PORT
   const indexPort = mode === "http" ? INDEX_HTTP_PORT : INDEX_HTTPS_PORT
@@ -96,7 +105,10 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
   /** Direct Bee API URL for container-to-container calls (always `localhost`; `*.localhost` Portless hosts often do not resolve inside Docker). */
   const beeApiBindUrl = `http://localhost:${BEE_PORT}`
 
-  const appPublicUrl = publicHttpUrl(mode, appPort, portless, "app")
+  const appPublicUrl =
+    portless && portlessAppPublicUrl
+      ? normalizePortlessAppPublicUrl(portlessAppPublicUrl)
+      : publicHttpUrl(mode, appPort, portless, "app")
   const indexPublicUrl = publicHttpUrl(mode, indexPort, portless, "index")
   const creditPublicUrl = publicHttpUrl(mode, creditPort, portless, "credit")
   const gatewayPublicUrl = publicHttpUrl(mode, gatewayPort, portless, "gateway")

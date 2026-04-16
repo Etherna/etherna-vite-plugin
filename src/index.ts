@@ -20,6 +20,8 @@ import {
   ensurePortlessProxy,
   getPortlessPublicUrl,
   isPortlessCliAvailable,
+  normalizePortlessAppPublicUrl,
+  PORTLESS_URL_ENV,
   registerPortlessAliases,
   removePortlessAliases,
   stopPortlessProxy,
@@ -204,10 +206,14 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         const fallbackPort = getEnv("app", defaultServiceEnvBuildContext(mode)).port
         const appPort = getDevServerPort(server, fallbackPort)
 
+        const portlessAppPublicUrl = process.env[PORTLESS_URL_ENV]?.trim()
         const serviceCtx: ServiceEnvBuildContext = {
           mode,
           portless: Boolean(options.portless),
           appPort,
+          ...(options.portless && portlessAppPublicUrl
+            ? { portlessAppPublicUrl }
+            : {}),
         }
 
         if (options.portless) {
@@ -232,9 +238,10 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           }
 
           const envs = buildServiceEnvs(serviceCtx)
-          const aliasEntries: { name: PortlessServiceAlias; port: number }[] = [
-            { name: "app", port: appPort },
-          ]
+          const aliasEntries: { name: PortlessServiceAlias; port: number }[] = []
+          if (!portlessAppPublicUrl) {
+            aliasEntries.push({ name: "app", port: appPort })
+          }
 
           if (isServiceEnabled("sso")) {
             aliasEntries.push({
@@ -303,10 +310,12 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             process.exit(1)
           }
 
+          const publicAppLabel =
+            portlessAppPublicUrl != null && portlessAppPublicUrl !== ""
+              ? `${normalizePortlessAppPublicUrl(portlessAppPublicUrl)}/`
+              : `${getPortlessPublicUrl("app")}/`
           console.log(
-            chalk.green(
-              `  ➜  ${chalk.bold("vite (portless)")}:   ${chalk.cyan(getPortlessPublicUrl("app") + "/")}`,
-            ),
+            chalk.green(`  ➜  ${chalk.bold("vite (portless)")}:   ${chalk.cyan(publicAppLabel)}`),
           )
         }
 
