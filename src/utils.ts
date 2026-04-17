@@ -11,7 +11,11 @@ export function resolvePath(...paths: string[]) {
 }
 
 export function resolvePathEscape(...paths: string[]) {
-  return resolvePath(...paths).replace(/:/g, "/")
+  const resolved = resolvePath(...paths)
+  if (process.platform === "win32") {
+    return resolved.replace(/\\/g, "/")
+  }
+  return resolved
 }
 
 export function logSuccess(

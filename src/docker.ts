@@ -447,7 +447,10 @@ export async function startAspContainer(
     args: [
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       ...(mode === "https"
-        ? ["-v", `${resolvePathEscape(CERTIFICATE_DIR)}:${CONTAINER_CERTS_DIR}/`]
+        ? [
+            "--mount",
+            `type=bind,source=${resolvePathEscape(CERTIFICATE_DIR)},target=${CONTAINER_CERTS_DIR}/`,
+          ]
         : []),
       "--network",
       "host",
@@ -566,8 +569,8 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
       `${blockchainPort + 1}:${blockchainPort + 1}`,
       "--mount",
       `type=volume,source=${volumeName},target=/root/.ethereum`,
-      "-v",
-      `${resolvePathEscape(".ethereum")}:/root/extra`,
+      "--mount",
+      `type=bind,source=${resolvePathEscape(".ethereum")},target=/root/extra`,
     ],
     cmd: [
       "--allow-insecure-unlock",
@@ -598,7 +601,11 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
     const text = String(data)
     if (!readinessCheckStarted && /HTTP server started/gm.test(text)) {
       readinessCheckStarted = true
-      void waitForBeeContracts(`http://127.0.0.1:${blockchainPort}`, beeContractAddresses, volumeName)
+      void waitForBeeContracts(
+        `http://127.0.0.1:${blockchainPort}`,
+        beeContractAddresses,
+        volumeName,
+      )
         .then(() => {
           startupSettled = true
           settleBlockchainBootstrap()
