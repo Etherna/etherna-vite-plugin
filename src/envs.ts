@@ -27,6 +27,15 @@ const GATEWAY_HTTP_PORT = 32640
 const GATEWAY_HTTPS_PORT = 42640
 
 const BEEHIVE_HTTP_PORT = 12610
+const SHKEEPER_HTTP_PORT = 32650
+const ETHEREUM_SHKEEPER_PORT = 6000
+
+/**
+ * Shared ShKeeper backend API key used by the shkeeper core, every coin-adapter
+ * container (e.g. `ethereum-shkeeper`), and the `etherna-credit` client.
+ * All of them must agree on the same value; upstream helm chart defaults it to `"key"`.
+ */
+const SHKEEPER_BACKEND_KEY = "shkeeper"
 
 type UnionToIntersection<Union> = (
   Union extends unknown ? (distributedUnion: Union) => void : never
@@ -128,6 +137,37 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
     app: {
       port: appPort,
     },
+    shkeeper: {
+      port: SHKEEPER_HTTP_PORT,
+    },
+    "shkeeper-core": {
+      DEV_MODE: "1",
+      BTC_WALLET: "disabled",
+      LTC_WALLET: "disabled",
+      DOGE_WALLET: "disabled",
+      ETH_WALLET: "enabled",
+      ETH_USERNAME: "shkeeper",
+      ETH_PASSWORD: "shkeeper",
+      ETHEREUM_API_SERVER_HOST: "localhost",
+      ETHEREUM_SERVER_PORT: String(ETHEREUM_SHKEEPER_PORT),
+      SHKEEPER_BACKEND_KEY: SHKEEPER_BACKEND_KEY,
+      SHKEEPER_BTC_BACKEND_KEY: SHKEEPER_BACKEND_KEY,
+    },
+    "ethereum-shkeeper": {
+      FULLNODE_URL: `http://localhost:${BLOCKCHAIN_PORT}`,
+      FULLNODE_TIMEOUT: "60",
+      CURRENT_ETH_NETWORK: "custom",
+      WEB3_ENABLE_POA_MIDDLEWARE: "1",
+      BLOCK_SCANNER_MAX_CATCHUP_BLOCKS: "64",
+      ETH_USERNAME: "shkeeper",
+      ETH_PASSWORD: "shkeeper",
+      SHKEEPER_BACKEND_KEY: SHKEEPER_BACKEND_KEY,
+      SHKEEPER_HOST: `localhost:${SHKEEPER_HTTP_PORT}`,
+      REDIS_HOST: "localhost",
+      SQLALCHEMY_DATABASE_URI:
+        "mariadb+pymysql://root:shkeeper@localhost:3306/ethereum-shkeeper?charset=utf8mb4",
+      LAST_BLOCK_LOCKED: "FALSE",
+    },
     elastic: {
       "discovery.type": "single-node",
       "xpack.security.enabled": "false",
@@ -170,6 +210,10 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaCreditHangfireDev`,
       "ConnectionStrings:CreditDb": `${mongodbUrl}/ethernaCreditDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
+      DisableHttpsRedirection: "true",
+      "Payments:ShKeeper:Url": `http://localhost:${SHKEEPER_HTTP_PORT}`,
+      "Payments:ShKeeper:ApiKey": SHKEEPER_BACKEND_KEY,
+      "Payments:ShKeeper:CustomCallbackBaseUrl": creditBindUrl,
     },
     "etherna-gateway": {
       ...baseAspEnv,
@@ -246,6 +290,8 @@ export type IndexEnv = StringEnvOverride<BuiltServiceEnvs["etherna-index"]>
 export type GatewayEnv = StringEnvOverride<BuiltServiceEnvs["etherna-gateway"]>
 export type CreditEnv = StringEnvOverride<BuiltServiceEnvs["etherna-credit"]>
 export type BeehiveEnv = StringEnvOverride<BuiltServiceEnvs["etherna-beehive-manager"]>
+export type ShkeeperEnv = StringEnvOverride<BuiltServiceEnvs["shkeeper-core"]>
+export type ShkeeperEthereumEnv = StringEnvOverride<BuiltServiceEnvs["ethereum-shkeeper"]>
 
 /** Union of env overrides accepted by ASP.NET Etherna containers (SSO, Index, Gateway, Credit, Beehive). */
 export type AspServiceEnv = SsoEnv | IndexEnv | GatewayEnv | CreditEnv | BeehiveEnv

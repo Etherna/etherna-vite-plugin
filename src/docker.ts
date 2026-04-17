@@ -7,6 +7,11 @@ import { defaultServiceEnvBuildContext, getEnv } from "./envs"
 import { getPortlessPublicUrl, PORTLESS_CONTAINER_ALIASES } from "./portless"
 import { trustContainerCertificate } from "./ssl"
 import {
+  ensureEthereumShkeeperDockerImage,
+  ensureShkeeperDockerImage,
+  resolveEthereumShkeeperImageName,
+} from "./builder"
+import {
   getBeeUnderlayAddress,
   logError,
   logLoading,
@@ -15,9 +20,18 @@ import {
   resolvePathEscape,
 } from "./utils"
 
-import type { AspServiceEnv, BeeEnv, ElasticEnv, MongoEnv, ServiceEnvBuildContext } from "./envs"
+import type {
+  AspServiceEnv,
+  BeeEnv,
+  ElasticEnv,
+  MongoEnv,
+  ServiceEnvBuildContext,
+  ShkeeperEnv,
+  ShkeeperEthereumEnv,
+} from "./envs"
 
 const BEE_NETWORK_NAME = "etherna_bee_network"
+const SHKEEPER_NETWORK_NAME = "etherna_shkeeper_network"
 
 const DOCKER_GET_STARTED_URL = "https://docs.docker.com/get-docker/"
 const DOCKER_DAEMON_WAIT_MS = 30_000
@@ -196,24 +210,26 @@ async function waitForBeeContracts(rpcUrl: string, addresses: string[], volumeNa
 
   while (Date.now() < deadline) {
     const [blockNumber, codes] = await Promise.all([
-      getEthereumBlockNumber(rpcUrl),
-      Promise.all(addresses.map((address) => getEthereumCode(rpcUrl, address))),
+      getEthereumBlockNumber(rpcUrl).catch(() => null),
+      Promise.all(addresses.map((address) => getEthereumCode(rpcUrl, address).catch(() => null))),
     ])
 
-    if (firstObservedBlock === null) {
-      firstObservedBlock = blockNumber
-    }
+    if (blockNumber != null && codes.every((code) => code != null)) {
+      if (firstObservedBlock === null) {
+        firstObservedBlock = blockNumber
+      }
 
-    if (codes.every((code) => isEthereumCodeDeployed(code))) {
-      return
-    }
+      if (codes.every((code) => isEthereumCodeDeployed(code))) {
+        return
+      }
 
-    const blockchainLooksCorrupted =
-      blockNumber >= BEE_CORRUPTED_CHAIN_BLOCK_THRESHOLD ||
-      blockNumber - firstObservedBlock >= BEE_CORRUPTED_CHAIN_PROGRESS_BLOCKS
+      const blockchainLooksCorrupted =
+        blockNumber >= BEE_CORRUPTED_CHAIN_BLOCK_THRESHOLD ||
+        blockNumber - firstObservedBlock >= BEE_CORRUPTED_CHAIN_PROGRESS_BLOCKS
 
-    if (blockchainLooksCorrupted) {
-      throw createCorruptedBlockchainError(volumeName)
+      if (blockchainLooksCorrupted) {
+        throw createCorruptedBlockchainError(volumeName)
+      }
     }
 
     await sleep(BEE_CONTRACT_DEPLOY_POLL_MS)
@@ -284,11 +300,7 @@ export async function startDockerContainer({
     await stopContainer(containerName)
   }
 
-  const proc = spawn(
-    "docker",
-    ["run", "--rm", "--name", containerName, ...args, imageName, ...cmd],
-    {},
-  )
+  const proc = spawn("docker", ["run", "--rm", "--name", containerName, ...args, imageName, ...cmd])
   proc.stdout.on("data", (data) => {
     const text = String(data)
 
@@ -447,7 +459,10 @@ export async function startAspContainer(
     args: [
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       ...(mode === "https"
-        ? ["-v", `${resolvePathEscape(CERTIFICATE_DIR)}:${CONTAINER_CERTS_DIR}/`]
+        ? [
+            "--mount",
+            `type=bind,source=${resolvePathEscape(CERTIFICATE_DIR)},target=${CONTAINER_CERTS_DIR}/`,
+          ]
         : []),
       "--network",
       "host",
@@ -566,8 +581,8 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
       `${blockchainPort + 1}:${blockchainPort + 1}`,
       "--mount",
       `type=volume,source=${volumeName},target=/root/.ethereum`,
-      "-v",
-      `${resolvePathEscape(".ethereum")}:/root/extra`,
+      "--mount",
+      `type=bind,source=${resolvePathEscape(".ethereum")},target=/root/extra`,
     ],
     cmd: [
       "--allow-insecure-unlock",
@@ -598,7 +613,11 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
     const text = String(data)
     if (!readinessCheckStarted && /HTTP server started/gm.test(text)) {
       readinessCheckStarted = true
-      void waitForBeeContracts(`http://127.0.0.1:${blockchainPort}`, beeContractAddresses, volumeName)
+      void waitForBeeContracts(
+        `http://127.0.0.1:${blockchainPort}`,
+        beeContractAddresses,
+        volumeName,
+      )
         .then(() => {
           startupSettled = true
           settleBlockchainBootstrap()
@@ -844,4 +863,429 @@ async function createNetwork(networkName: string) {
       res()
     })
   })
+}
+
+export async function startShkeeperCoreContainer({
+  context,
+  envs,
+  build,
+  networkName,
+}: {
+  context: ServiceEnvBuildContext
+  envs?: ShkeeperEnv
+  build: {
+    imageName: string
+  }
+  networkName: string
+}) {
+  const name = "shkeeper"
+  const instanceVolumeName = "etherna_shkeeper-instance-volume"
+  await createContainerVolume(instanceVolumeName)
+
+  let endPromise = undefined as undefined | (() => void)
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
+    endPromise = res
+    rejectPromise = rej
+  })
+
+  let lastLog: string | undefined = undefined
+  let ready = false
+  const env = {
+    ...(getEnv("shkeeper-core", context) ?? {}),
+    ...envs,
+  }
+  const port = String(getEnv("shkeeper", context)?.port ?? "32650")
+  const useHostNetwork = networkName === "host"
+  const listenPort = useHostNetwork ? port : "5000"
+
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName: build.imageName,
+    args: [
+      ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
+      "--mount",
+      `type=volume,source=${instanceVolumeName},target=/shkeeper.io/instance`,
+      "--network",
+      networkName,
+      ...(useHostNetwork ? [] : ["-p", `${port}:5000`]),
+    ],
+    ...(useHostNetwork
+      ? {
+          cmd: [
+            "bash",
+            "-c",
+            `gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:${port} 'shkeeper:create_app()'`,
+          ],
+        }
+      : {}),
+  })
+
+  const handleStdData = (data: unknown) => {
+    lastLog = undefined
+
+    const text = String(data)
+    if (new RegExp(`Listening at: http://.+:${listenPort}`, "gm").test(text)) {
+      ready = true
+      logSuccess(name, "http", port)
+      endPromise?.()
+    } else {
+      lastLog = text
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    if (!ready) {
+      rejectPromise?.(error)
+    }
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, lastLog || `Container closed with code ${code}`)
+    if (!ready) {
+      rejectPromise?.(new Error(`Container closed with code ${code}`))
+    }
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
+export async function startShkeeperEthereumApiContainer({
+  context,
+  envs,
+  networkName,
+  imageName,
+}: {
+  context: ServiceEnvBuildContext
+  envs?: ShkeeperEthereumEnv
+  networkName: string
+  imageName: string
+}) {
+  const name = "ethereum-shkeeper"
+  let endPromise = undefined as undefined | (() => void)
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
+    endPromise = res
+    rejectPromise = rej
+  })
+
+  let lastLog: string | undefined = undefined
+  let ready = false
+  const env = {
+    ...(getEnv("ethereum-shkeeper", context) ?? {}),
+    ...envs,
+  }
+
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName,
+    args: [
+      ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
+      "--network",
+      networkName,
+    ],
+    cmd: [
+      "bash",
+      "-c",
+      "sleep 30 && gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:6000 run:server",
+    ],
+  })
+
+  const handleStdData = (data: unknown) => {
+    lastLog = undefined
+
+    const text = String(data)
+    if (/Listening at: http:\/\/.+:6000/gm.test(text)) {
+      ready = true
+      endPromise?.()
+    } else {
+      lastLog = text
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    if (!ready) {
+      rejectPromise?.(error)
+    }
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, lastLog || `Container closed with code ${code}`)
+    if (!ready) {
+      rejectPromise?.(new Error(`Container closed with code ${code}`))
+    }
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
+export async function startShkeeperMariaDbContainer(networkName = SHKEEPER_NETWORK_NAME) {
+  const name = "ethereum-shkeeper-mariadb"
+  const volumeName = "etherna_shkeeper-mariadb-volume"
+  await createContainerVolume(volumeName)
+
+  let endPromise = undefined as undefined | (() => void)
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
+    endPromise = res
+    rejectPromise = rej
+  })
+
+  let lastLog: string | undefined = undefined
+  let ready = false
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName: "mariadb:10.9.3",
+    args: [
+      "-e",
+      "MARIADB_ROOT_PASSWORD=shkeeper",
+      "-e",
+      "MARIADB_DATABASE=ethereum-shkeeper",
+      "--mount",
+      `type=volume,source=${volumeName},target=/var/lib/mysql`,
+      "--network",
+      networkName,
+    ],
+  })
+
+  const handleStdData = (data: unknown) => {
+    lastLog = undefined
+
+    const text = String(data)
+    if (/ready for connections/gim.test(text)) {
+      ready = true
+      endPromise?.()
+    } else {
+      lastLog = text
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    if (!ready) {
+      rejectPromise?.(error)
+    }
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, lastLog || `Container closed with code ${code}`)
+    if (!ready) {
+      rejectPromise?.(new Error(`Container closed with code ${code}`))
+    }
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
+export async function startShkeeperRedisContainer(networkName = SHKEEPER_NETWORK_NAME) {
+  const name = "ethereum-shkeeper-redis"
+  const volumeName = "etherna_shkeeper-redis-volume"
+  await createContainerVolume(volumeName)
+
+  let endPromise = undefined as undefined | (() => void)
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
+    endPromise = res
+    rejectPromise = rej
+  })
+
+  let lastLog: string | undefined = undefined
+  let ready = false
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName: "redis:7",
+    args: [
+      "--mount",
+      `type=volume,source=${volumeName},target=/data`,
+      "--network",
+      networkName,
+    ],
+  })
+
+  const handleStdData = (data: unknown) => {
+    lastLog = undefined
+
+    const text = String(data)
+    if (/Ready to accept connections/gm.test(text)) {
+      ready = true
+      endPromise?.()
+    } else {
+      lastLog = text
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    if (!ready) {
+      rejectPromise?.(error)
+    }
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, lastLog || `Container closed with code ${code}`)
+    if (!ready) {
+      rejectPromise?.(new Error(`Container closed with code ${code}`))
+    }
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
+export async function startShkeeperEthereumTasksContainer({
+  context,
+  envs,
+  networkName,
+  imageName,
+}: {
+  context: ServiceEnvBuildContext
+  envs?: ShkeeperEthereumEnv
+  networkName: string
+  imageName: string
+}) {
+  const name = "ethereum-tasks"
+  let endPromise = undefined as undefined | (() => void)
+  let rejectPromise = undefined as undefined | ((reason?: unknown) => void)
+  const promise = new Promise<void>((res, rej) => {
+    endPromise = res
+    rejectPromise = rej
+  })
+
+  let lastLog: string | undefined = undefined
+  let ready = false
+  const env = {
+    ...(getEnv("ethereum-shkeeper", context) ?? {}),
+    ...envs,
+    C_FORCE_ROOT: "1",
+  }
+
+  const proc = await startDockerContainer({
+    containerName: name,
+    imageName,
+    args: [
+      ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
+      "--network",
+      networkName,
+    ],
+    cmd: ["bash", "-c", "sleep 30 && celery -A celery_worker.celery worker --loglevel=info -B"],
+  })
+
+  const handleStdData = (data: unknown) => {
+    lastLog = undefined
+
+    const text = String(data)
+    if (/ready\./gim.test(text)) {
+      ready = true
+      endPromise?.()
+    } else {
+      lastLog = text
+    }
+  }
+
+  proc.stdout.on("data", handleStdData)
+  proc.stdout.on("error", (error) => {
+    logError(name, "FATAL: " + error.message)
+    if (!ready) {
+      rejectPromise?.(error)
+    }
+  })
+  proc.stderr.on("data", handleStdData)
+  proc.on("close", (code) => {
+    logError(name, lastLog || `Container closed with code ${code}`)
+    if (!ready) {
+      rejectPromise?.(new Error(`Container closed with code ${code}`))
+    }
+    proc.kill()
+  })
+
+  await promise
+
+  return proc
+}
+
+export async function startShkeeperStack({
+  context,
+  build,
+  coreEnv,
+  ethereumEnv,
+  ethereumGithubRepo,
+  ethereumGithubBranch,
+}: {
+  context: ServiceEnvBuildContext
+  build: {
+    imageName: string
+    githubRepo?: string
+    githubBranch?: string
+  }
+  coreEnv?: ShkeeperEnv
+  ethereumEnv?: ShkeeperEthereumEnv
+  /** When set, build `etherna/ethereum-shkeeper:…` from this repo before starting adapter containers. */
+  ethereumGithubRepo?: string
+  /** Branch or tag to clone for `ethereumGithubRepo` (defaults to `main` in the builder). */
+  ethereumGithubBranch?: string
+}) {
+  const networkName = "host"
+  const started = [] as ReturnType<typeof spawn>[]
+
+  try {
+    await ensureShkeeperDockerImage(build.githubRepo, build.githubBranch)
+    await ensureEthereumShkeeperDockerImage(ethereumGithubRepo, ethereumGithubBranch)
+
+    const ethereumImageName = resolveEthereumShkeeperImageName(ethereumGithubRepo)
+
+    const [mariadb, redis] = await Promise.all([
+      startShkeeperMariaDbContainer(networkName),
+      startShkeeperRedisContainer(networkName),
+    ])
+    started.push(mariadb, redis)
+
+    const [ethereumApi, ethereumTasks] = await Promise.all([
+      startShkeeperEthereumApiContainer({
+        context,
+        envs: ethereumEnv,
+        networkName,
+        imageName: ethereumImageName,
+      }),
+      startShkeeperEthereumTasksContainer({
+        context,
+        envs: ethereumEnv,
+        networkName,
+        imageName: ethereumImageName,
+      }),
+    ])
+    started.push(ethereumApi, ethereumTasks)
+
+    const shkeeper = await startShkeeperCoreContainer({
+      context,
+      envs: coreEnv,
+      build,
+      networkName,
+    })
+    started.push(shkeeper)
+
+    return started
+  } catch (error) {
+    for (const proc of started) {
+      proc.kill()
+    }
+
+    throw error
+  }
 }
