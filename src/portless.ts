@@ -103,15 +103,29 @@ export async function ensurePortlessProxy(): Promise<{ startedByUs: boolean }> {
   )
 }
 
-export async function registerPortlessAliases(
-  entries: ReadonlyArray<{ name: PortlessServiceAlias; port: number }>,
-): Promise<void> {
-  for (const { name, port } of entries) {
-    const r = await runPortlessCli(portlessAliasAddArgs(name, port, true))
-    if (r.code !== 0) {
-      const combined = `${r.stderr}\n${r.stdout}`
-      throw new Error(`portless alias ${name} ${port} failed: ${combined.trim()}`)
-    }
+/** Parses a port from env strings, URL fragments, or numbers for Portless CLI registration. */
+export function parsePortlessPort(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+  const s = String(value).trim()
+  if (s === "") {
+    throw new Error("Port value is empty")
+  }
+  const n = Number.parseInt(s, 10)
+  if (!Number.isFinite(n)) {
+    throw new Error(`Invalid port: ${String(value)}`)
+  }
+  return n
+}
+
+/** Registers a single alias with the Portless CLI (`portless alias <name> <port> --force`). */
+export async function addPortlessAlias(name: PortlessServiceAlias, port: unknown): Promise<void> {
+  const portNumber = parsePortlessPort(port)
+  const r = await runPortlessCli(portlessAliasAddArgs(name, portNumber, true))
+  if (r.code !== 0) {
+    const combined = `${r.stderr}\n${r.stdout}`
+    throw new Error(`portless alias ${name} ${portNumber} failed: ${combined.trim()}`)
   }
 }
 

@@ -61,12 +61,10 @@ export default defineConfig({
 
 #### SHKeeper (Docker-only ETH profile)
 
-`shkeeper` is opt-in and currently targets a Docker-only `ETH` setup:
+`shkeeper` is opt-in and currently targets a Docker-only `ETH` setup.
 
-- if the core `shkeeper.io` image is missing, the plugin fetches the latest upstream release source,
-  builds it locally, and removes the temporary source tree after a successful build
-- the plugin starts `shkeeper`, `ethereum-shkeeper`, `ethereum-tasks`, Redis, and MariaDB
-- it reuses your existing Ethereum RPC instead of starting a fullnode
+- use `githubRepo` prop to build shkeeper or ethereum-shkeeper from a custom repository
+- using `githubRepo: "mattiaz9/ethereum-shkeeper"` fork allows to use the integrated Ethereum RPC out of the box
 
 ```ts
 // vite.config.ts
@@ -78,9 +76,7 @@ export default defineConfig({
     etherna({
       shkeeper: {
         ethereum: {
-          env: {
-            FULLNODE_URL: "http://localhost:8545",
-          },
+          githubRepo: "mattiaz9/ethereum-shkeeper",
         },
       },
     }),
@@ -96,24 +92,6 @@ etherna({
 })
 ```
 
-Notes:
-
-- `shkeeper` is disabled by default.
-- `shkeeper: true` enables SHKeeper with the default image/build/env settings.
-- On first run, the plugin builds the local image as `etherna/shkeeper:local` if it is missing.
-- The default source path uses the latest SHKeeper GitHub release tag. It first tries the release
-  archive download and falls back to cloning that exact tag if archive extraction is unavailable.
-- `shkeeper.build.contextPath` is optional and acts as a local-source override when you want to
-  build from a checkout or fork instead of the fetched latest release.
-- The SHKeeper UI is exposed on `http://localhost:32650`.
-- The SHKeeper containers use host-network-friendly `localhost` addresses for Redis, MariaDB, the
-  sidecar, and the ETH RPC.
-- The first supported profile is `ETH` only. ERC-20 variants such as `ETH-USDT` and `ETH-USDC` are
-  not wired yet.
-- `ethereum-shkeeper` defaults to `CURRENT_ETH_NETWORK=sepolia`. Override it in
-  `shkeeper.ethereum.env` if your external RPC targets a different network.
-- If the auto-fetched source build fails, the temporary source tree is left in the cache directory
-  so you can inspect it.
 
 ### Disable all containers
 

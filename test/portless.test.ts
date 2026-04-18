@@ -4,6 +4,7 @@ import {
   PORTLESS_PROXY_PORT,
   getPortlessPublicUrl,
   normalizePortlessAppPublicUrl,
+  parsePortlessPort,
   portlessAliasAddArgs,
   portlessProxyStartArgs,
 } from "../src/portless.ts"
@@ -29,4 +30,15 @@ it("normalizePortlessAppPublicUrl trims and strips trailing slashes", () => {
   expect(normalizePortlessAppPublicUrl("  http://dapp.localhost:1355/  ")).toBe(
     "http://dapp.localhost:1355",
   )
+})
+
+it("parsePortlessPort accepts numbers and numeric strings", () => {
+  expect(parsePortlessPort(32610)).toBe(32610)
+  expect(parsePortlessPort("32610")).toBe(32610)
+  expect(parsePortlessPort("  80 ")).toBe(80)
+})
+
+it("parsePortlessPort rejects empty and invalid values", () => {
+  expect(() => parsePortlessPort("")).toThrow(/empty/)
+  expect(() => parsePortlessPort("not-a-port")).toThrow(/Invalid port/)
 })

@@ -2,7 +2,7 @@ import chalk from "chalk"
 
 import { assertValidGithubRepo, resolveShkeeperImageName } from "./builder"
 import { isBlockchainBootstrapInProgress, waitForBlockchainBootstrapToSettle } from "./docker"
-import { removePortlessAliases, stopPortlessProxy } from "./portless"
+import { addPortlessAlias, removePortlessAliases, stopPortlessProxy } from "./portless"
 
 import type {
   BeeEnv,
@@ -112,7 +112,7 @@ export interface EthernaPluginHarness {
   isShutdownRequested: () => boolean
   pushSpawn: (...procs: ChildProcess[]) => void
   setPortlessProxyStartedByUs: (started: boolean) => void
-  recordPortlessAliases: (aliases: PortlessServiceAlias[]) => void
+  recordPortlessAlias: (name: PortlessServiceAlias, port: unknown) => Promise<void>
   cleanupPortless: () => Promise<void>
   killSpawns: () => void
   shutdownServices: (exitProcess?: boolean, force?: boolean) => Promise<void>
@@ -120,7 +120,7 @@ export interface EthernaPluginHarness {
 }
 
 /** Option helpers plus portless cleanup, child-process tracking, and shutdown (closure per plugin instance). */
-export function harnessEthernaPlugin(options: DockerPluginOptions): EthernaPluginHarness {
+export function harnessEthernaPlugin(options: DockerPluginOptions) {
   const spawns: ChildProcess[] = []
   let portlessProxyStartedByUs = false
   const portlessAliasesRegistered: PortlessServiceAlias[] = []
@@ -239,12 +239,13 @@ export function harnessEthernaPlugin(options: DockerPluginOptions): EthernaPlugi
     setPortlessProxyStartedByUs: (started) => {
       portlessProxyStartedByUs = started
     },
-    recordPortlessAliases: (aliases) => {
-      portlessAliasesRegistered.push(...aliases)
+    recordPortlessAlias: async (name, port) => {
+      await addPortlessAlias(name, port)
+      portlessAliasesRegistered.push(name)
     },
     cleanupPortless,
     killSpawns,
     shutdownServices,
     installProcessSignalHandlers,
-  }
+  } satisfies EthernaPluginHarness
 }

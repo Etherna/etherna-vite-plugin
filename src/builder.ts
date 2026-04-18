@@ -122,9 +122,6 @@ export async function ensureDockerImageFromGitHub(options: {
   const { logLabel, imageName, sourceRepo, workspacePrefix, gitRef } = options
 
   if (await isDockerImageAvailable(imageName)) {
-    console.log(
-      `  ${chalk.gray("➜")}  ${chalk.bold(logLabel)}:   ${chalk.gray(`Using existing image ${imageName}.`)}`,
-    )
     return
   }
 

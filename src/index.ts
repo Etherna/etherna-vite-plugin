@@ -1,12 +1,7 @@
 import chalk from "chalk"
 
 import { assertValidGithubRepo } from "./builder"
-import {
-  applyEthernaPluginHttpsFallback,
-  getDevServerPort,
-  harnessEthernaPlugin,
-  type DockerPluginOptions,
-} from "./plugin-define"
+import { createDependenciesTree } from "./dependencies-tree"
 import {
   ensureDockerReady,
   startAspContainer,
@@ -23,19 +18,23 @@ import {
   parsePortFromAspNetCoreUrls,
 } from "./envs"
 import {
+  applyEthernaPluginHttpsFallback,
+  getDevServerPort,
+  harnessEthernaPlugin,
+  type DockerPluginOptions,
+  type EthernaPluginHarness,
+} from "./plugin-define"
+import {
   ensurePortlessProxy,
   getPortlessPublicUrl,
   isPortlessCliAvailable,
   normalizePortlessAppPublicUrl,
   PORTLESS_URL_ENV,
-  registerPortlessAliases,
 } from "./portless"
 import { generateSslCertificate } from "./ssl"
-import { fetchFirstShkeeperWalletApiKey } from "./utils"
+import { fetchFirstShkeeperWalletApiKey, logError } from "./utils"
 
 import type { ServiceEnvBuildContext } from "./envs"
-import type { PortlessServiceAlias } from "./portless"
-import type { ChildProcess } from "node:child_process"
 import type { Plugin, ServerOptions } from "vite"
 
 export type {
@@ -72,6 +71,183 @@ export {
   harnessEthernaPlugin,
 } from "./plugin-define"
 
+export type {
+  DependencyFailureMode,
+  DependencyTreeLogger,
+  DependencyTreeRunResult,
+  DependencyTreeServiceDefinition,
+  DependencyTreeServiceResult,
+  DependencyTreeServiceStatus,
+} from "./dependencies-tree"
+export {
+  createDependenciesTree,
+  DependencyTreeValidationError,
+  validateDependencyTree,
+} from "./dependencies-tree"
+
+export { addPortlessAlias, parsePortlessPort } from "./portless"
+
+type EthernaStartupHandlers = {
+  startBeeBlockchain: () => Promise<boolean>
+  startBeeNodes: () => Promise<boolean>
+  startShkeeper: () => Promise<boolean>
+  startElastic: () => Promise<boolean>
+  startMongo: () => Promise<boolean>
+  startBeehive: () => Promise<boolean>
+  startIndex: () => Promise<boolean>
+  startSso: () => Promise<boolean>
+  startGateway: () => Promise<boolean>
+  startCredit: () => Promise<boolean>
+}
+
+function createEthernaStartupHandlers(ctx: {
+  serviceCtx: ServiceEnvBuildContext
+  getServiceEnv: EthernaPluginHarness["getServiceEnv"]
+  pushSpawn: EthernaPluginHarness["pushSpawn"]
+  isShutdownRequested: EthernaPluginHarness["isShutdownRequested"]
+  getShkeeperConfig: EthernaPluginHarness["getShkeeperConfig"]
+  getShkeeperBuild: EthernaPluginHarness["getShkeeperBuild"]
+  isShkeeperEnabled: () => boolean
+}): EthernaStartupHandlers {
+  const {
+    serviceCtx,
+    getServiceEnv,
+    pushSpawn,
+    isShutdownRequested,
+    getShkeeperConfig,
+    getShkeeperBuild,
+    isShkeeperEnabled,
+  } = ctx
+
+  return {
+    async startBeeBlockchain() {
+      try {
+        const p = await startBlockchain(serviceCtx, getServiceEnv("bee"))
+        pushSpawn(p)
+        return !isShutdownRequested()
+      } catch (error: unknown) {
+        if (isShutdownRequested()) {
+          return false
+        }
+        throw error
+      }
+    },
+    async startBeeNodes() {
+      try {
+        const procs = await startBeeNodes(serviceCtx, getServiceEnv("bee"))
+        if (isShutdownRequested()) {
+          return false
+        }
+        pushSpawn(...procs)
+        return !isShutdownRequested()
+      } catch (error: unknown) {
+        if (isShutdownRequested()) {
+          return false
+        }
+        throw error
+      }
+    },
+    async startShkeeper() {
+      const sk = getShkeeperConfig()
+      const ethRepo = sk.ethereum?.githubRepo?.trim()
+      if (ethRepo) {
+        assertValidGithubRepo(ethRepo)
+      }
+      try {
+        const procs = await startShkeeperStack({
+          context: serviceCtx,
+          build: getShkeeperBuild(),
+          coreEnv: sk.env,
+          ethereumEnv: sk.ethereum?.env,
+          ethereumGithubRepo: ethRepo || undefined,
+          ethereumGithubBranch: sk.ethereum?.githubBranch?.trim() || undefined,
+        })
+        pushSpawn(...procs)
+        return !isShutdownRequested()
+      } catch (error: unknown) {
+        if (isShutdownRequested()) {
+          return false
+        }
+        throw error
+      }
+    },
+    async startElastic() {
+      const p = await startElasticContainer(getServiceEnv("elastic"), serviceCtx)
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startMongo() {
+      const p = await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx)
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startBeehive() {
+      const p = await startAspContainer(
+        "etherna-beehive-manager",
+        "etherna/beehive-manager:latest",
+        serviceCtx,
+        getServiceEnv("beehive"),
+      )
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startIndex() {
+      const p = await startAspContainer(
+        "etherna-index",
+        "etherna/etherna-index:latest",
+        serviceCtx,
+        getServiceEnv("index"),
+      )
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startSso() {
+      const p = await startAspContainer(
+        "etherna-sso",
+        "etherna/etherna-sso:latest",
+        serviceCtx,
+        getServiceEnv("sso"),
+      )
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startGateway() {
+      const p = await startAspContainer(
+        "etherna-gateway",
+        "etherna/etherna-gateway:latest",
+        serviceCtx,
+        getServiceEnv("gateway"),
+      )
+      pushSpawn(p)
+      return !isShutdownRequested()
+    },
+    async startCredit() {
+      try {
+        let creditEnv = getServiceEnv("credit")
+        if (isShkeeperEnabled()) {
+          const apiKey = await fetchFirstShkeeperWalletApiKey()
+          if (apiKey) {
+            creditEnv = { ...creditEnv, "Payments:ShKeeper:ApiKey": apiKey }
+          }
+        }
+        const p = await startAspContainer(
+          "etherna-credit",
+          "etherna/etherna-credit:latest",
+          serviceCtx,
+          creditEnv,
+        )
+        pushSpawn(p)
+        return !isShutdownRequested()
+      } catch (error: unknown) {
+        if (isShutdownRequested()) {
+          return false
+        }
+        throw error
+      }
+    },
+  }
+}
+
 export function etherna(options: DockerPluginOptions = {}): Plugin {
   const harness = harnessEthernaPlugin(options)
   applyEthernaPluginHttpsFallback(options)
@@ -86,7 +262,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     isShutdownRequested,
     pushSpawn,
     setPortlessProxyStartedByUs,
-    recordPortlessAliases,
+    recordPortlessAlias,
     cleanupPortless,
     shutdownServices,
   } = harness
@@ -130,6 +306,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           ...(options.portless && portlessAppPublicUrl ? { portlessAppPublicUrl } : {}),
         }
 
+        let envs: ReturnType<typeof buildServiceEnvs> | undefined
         if (options.portless) {
           if (!(await isPortlessCliAvailable())) {
             console.error(
@@ -151,77 +328,19 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             process.exit(1)
           }
 
-          const envs = buildServiceEnvs(serviceCtx)
-          const aliasEntries: { name: PortlessServiceAlias; port: number }[] = []
+          envs = buildServiceEnvs(serviceCtx)
           if (!portlessAppPublicUrl) {
-            aliasEntries.push({ name: "app", port: appPort })
-          }
-
-          if (isServiceEnabled("sso")) {
-            aliasEntries.push({
-              name: "sso",
-              port: Number.parseInt(
-                parsePortFromAspNetCoreUrls(String(envs["etherna-sso"].ASPNETCORE_URLS)),
-                10,
-              ),
-            })
-          }
-          if (isServiceEnabled("index")) {
-            aliasEntries.push({
-              name: "index",
-              port: Number.parseInt(
-                parsePortFromAspNetCoreUrls(String(envs["etherna-index"].ASPNETCORE_URLS)),
-                10,
-              ),
-            })
-          }
-          if (isServiceEnabled("credit")) {
-            aliasEntries.push({
-              name: "credit",
-              port: Number.parseInt(
-                parsePortFromAspNetCoreUrls(String(envs["etherna-credit"].ASPNETCORE_URLS)),
-                10,
-              ),
-            })
-          }
-          if (isServiceEnabled("gateway")) {
-            aliasEntries.push({
-              name: "gateway",
-              port: Number.parseInt(
-                parsePortFromAspNetCoreUrls(String(envs["etherna-gateway"].ASPNETCORE_URLS)),
-                10,
-              ),
-            })
-          }
-          if (isServiceEnabled("beehive")) {
-            aliasEntries.push({
-              name: "beehive",
-              port: Number.parseInt(
-                parsePortFromAspNetCoreUrls(
-                  String(envs["etherna-beehive-manager"].ASPNETCORE_URLS),
+            try {
+              await recordPortlessAlias("app", appPort)
+            } catch (e) {
+              console.error(
+                chalk.red(
+                  `  portless: failed to register aliases: ${e instanceof Error ? e.message : String(e)}`,
                 ),
-                10,
-              ),
-            })
-          }
-          if (isServiceEnabled("bee")) {
-            const beeBase = getEnv("etherna-bee", serviceCtx) ?? {}
-            const beeMerged = { ...beeBase, ...getServiceEnv("bee") }
-            const beePort = Number(beeMerged.BEE_PORT ?? 1633)
-            aliasEntries.push({ name: "bee", port: beePort })
-          }
-
-          try {
-            await registerPortlessAliases(aliasEntries)
-            recordPortlessAliases(aliasEntries.map((e) => e.name))
-          } catch (e) {
-            console.error(
-              chalk.red(
-                `  portless: failed to register aliases: ${e instanceof Error ? e.message : String(e)}`,
-              ),
-            )
-            await cleanupPortless()
-            process.exit(1)
+              )
+              await cleanupPortless()
+              process.exit(1)
+            }
           }
 
           const publicAppLabel =
@@ -233,109 +352,148 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           )
         }
 
-        if (isServiceEnabled("bee")) {
-          void startBlockchain(serviceCtx, getServiceEnv("bee"))
-            .then((p) => {
-              pushSpawn(p)
-              if (isShutdownRequested()) {
-                return [] as ChildProcess[]
-              }
-              return startBeeNodes(serviceCtx, getServiceEnv("bee"))
-            })
-            .then((procs) => {
-              if (isShutdownRequested()) {
-                return
-              }
-              pushSpawn(...procs)
-            })
-            .catch((error: unknown) => {
-              if (!isShutdownRequested()) {
-                throw error
-              }
-            })
-        }
-        if (isShkeeperEnabled()) {
-          const sk = getShkeeperConfig()
-          const ethRepo = sk.ethereum?.githubRepo?.trim()
-          if (ethRepo) {
-            assertValidGithubRepo(ethRepo)
-          }
-          void startShkeeperStack({
-            context: serviceCtx,
-            build: getShkeeperBuild(),
-            coreEnv: sk.env,
-            ethereumEnv: sk.ethereum?.env,
-            ethereumGithubRepo: ethRepo || undefined,
-            ethereumGithubBranch: sk.ethereum?.githubBranch?.trim() || undefined,
-          })
-            .then((procs) => pushSpawn(...procs))
-            .catch((error: unknown) => {
-              if (!isShutdownRequested()) {
-                throw error
-              }
-            })
-        }
-        if (isServiceEnabled("elastic")) {
-          void startElasticContainer(getServiceEnv("elastic"), serviceCtx).then((p) => pushSpawn(p))
-        }
-        if (isServiceEnabled("mongo")) {
-          pushSpawn(await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx))
-        }
-        if (isServiceEnabled("beehive")) {
-          void startAspContainer(
-            "etherna-beehive-manager",
-            "etherna/beehive-manager:latest",
-            serviceCtx,
-            getServiceEnv("beehive"),
-          ).then((p) => pushSpawn(p))
-        }
-        if (isServiceEnabled("index")) {
-          void startAspContainer(
-            "etherna-index",
-            "etherna/etherna-index:latest",
-            serviceCtx,
-            getServiceEnv("index"),
-          ).then((p) => pushSpawn(p))
-        }
-        if (isServiceEnabled("sso")) {
-          pushSpawn(
-            await startAspContainer(
-              "etherna-sso",
-              "etherna/etherna-sso:latest",
-              serviceCtx,
-              getServiceEnv("sso"),
-            ),
-          )
-        }
-        if (isServiceEnabled("gateway")) {
-          void startAspContainer(
-            "etherna-gateway",
-            "etherna/etherna-gateway:latest",
-            serviceCtx,
-            getServiceEnv("gateway"),
-          ).then((p) => pushSpawn(p))
-        }
-        if (isServiceEnabled("credit")) {
-          void (async () => {
-            let creditEnv = getServiceEnv("credit")
-            if (isShkeeperEnabled()) {
-              const apiKey = await fetchFirstShkeeperWalletApiKey()
-              if (apiKey) {
-                creditEnv = { ...creditEnv, "Payments:ShKeeper:ApiKey": apiKey }
-              }
-            }
-            const p = await startAspContainer(
-              "etherna-credit",
-              "etherna/etherna-credit:latest",
-              serviceCtx,
-              creditEnv,
-            )
-            pushSpawn(p)
-          })().catch((error: unknown) => {
-            if (!isShutdownRequested()) {
-              throw error
-            }
-          })
+        const startup = createEthernaStartupHandlers({
+          serviceCtx,
+          getServiceEnv,
+          pushSpawn,
+          isShutdownRequested,
+          getShkeeperConfig,
+          getShkeeperBuild,
+          isShkeeperEnabled,
+        })
+
+        const tree = createDependenciesTree(
+          [
+            {
+              code: "bee-blockchain",
+              enabled: isServiceEnabled("bee"),
+              onFailure: "stop",
+              beforeStartup: options.portless
+                ? async () => {
+                    const beeBase = getEnv("etherna-bee", serviceCtx) ?? {}
+                    await recordPortlessAlias(
+                      "bee",
+                      { ...beeBase, ...getServiceEnv("bee") }.BEE_PORT ?? 1633,
+                    )
+                  }
+                : undefined,
+              startupCallback: startup.startBeeBlockchain,
+            },
+            {
+              code: "bee-nodes",
+              enabled: isServiceEnabled("bee"),
+              dependencies: ["bee-blockchain"],
+              onFailure: "stop",
+              startupCallback: startup.startBeeNodes,
+            },
+            {
+              code: "shkeeper",
+              enabled: isShkeeperEnabled(),
+              onFailure: "stop",
+              startupCallback: startup.startShkeeper,
+            },
+            {
+              code: "mongo",
+              enabled: isServiceEnabled("mongo"),
+              onFailure: "stop",
+              startupCallback: startup.startMongo,
+            },
+            {
+              code: "sso",
+              enabled: isServiceEnabled("sso"),
+              dependencies: ["mongo"],
+              onFailure: "stop",
+              beforeStartup:
+                options.portless && envs
+                  ? async () => {
+                      await recordPortlessAlias(
+                        "sso",
+                        parsePortFromAspNetCoreUrls(String(envs["etherna-sso"].ASPNETCORE_URLS)),
+                      )
+                    }
+                  : undefined,
+              startupCallback: startup.startSso,
+            },
+            {
+              code: "index",
+              enabled: isServiceEnabled("index"),
+              dependencies: ["mongo"],
+              onFailure: "stop",
+              beforeStartup:
+                options.portless && envs
+                  ? async () => {
+                      await recordPortlessAlias(
+                        "index",
+                        parsePortFromAspNetCoreUrls(String(envs["etherna-index"].ASPNETCORE_URLS)),
+                      )
+                    }
+                  : undefined,
+              startupCallback: startup.startIndex,
+            },
+            {
+              code: "beehive",
+              enabled: isServiceEnabled("beehive"),
+              dependencies: ["mongo"],
+              onFailure: "stop",
+              beforeStartup:
+                options.portless && envs
+                  ? async () => {
+                      await recordPortlessAlias(
+                        "beehive",
+                        parsePortFromAspNetCoreUrls(
+                          String(envs["etherna-beehive-manager"].ASPNETCORE_URLS),
+                        ),
+                      )
+                    }
+                  : undefined,
+              startupCallback: startup.startBeehive,
+            },
+            {
+              code: "gateway",
+              enabled: isServiceEnabled("gateway"),
+              dependencies: ["mongo", "sso"],
+              onFailure: "stop",
+              beforeStartup:
+                options.portless && envs
+                  ? async () => {
+                      await recordPortlessAlias(
+                        "gateway",
+                        parsePortFromAspNetCoreUrls(
+                          String(envs["etherna-gateway"].ASPNETCORE_URLS),
+                        ),
+                      )
+                    }
+                  : undefined,
+              startupCallback: startup.startGateway,
+            },
+            {
+              code: "credit",
+              enabled: isServiceEnabled("credit"),
+              dependencies: ["mongo", "sso", "shkeeper"],
+              onFailure: "stop",
+              beforeStartup:
+                options.portless && envs
+                  ? async () => {
+                      await recordPortlessAlias(
+                        "credit",
+                        parsePortFromAspNetCoreUrls(String(envs["etherna-credit"].ASPNETCORE_URLS)),
+                      )
+                    }
+                  : undefined,
+              startupCallback: startup.startCredit,
+            },
+            {
+              code: "elastic",
+              enabled: isServiceEnabled("elastic"),
+              onFailure: "stop",
+              startupCallback: startup.startElastic,
+            },
+          ],
+          { logError },
+        )
+        const result = await tree.start()
+        if (result.shouldStop && !isShutdownRequested()) {
+          await shutdownServices(false)
         }
       })
 

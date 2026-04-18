@@ -223,6 +223,22 @@ describe("ensureDockerImageFromGitHub", () => {
     })
   })
 
+  it("does not log when the image already exists", async () => {
+    const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => undefined)
+    const { ensureDockerImageFromGitHub } = await import("../src/builder.ts")
+
+    await ensureDockerImageFromGitHub({
+      logLabel: "shkeeper",
+      imageName: "etherna/shkeeper:local",
+      sourceRepo: "vsys-host/shkeeper.io",
+      workspacePrefix: ".shkeeper-build",
+      gitRef: "2.5.12",
+    })
+
+    expect(consoleLogSpy).not.toHaveBeenCalled()
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+  })
+
   it("clones the pinned git ref, builds, and cleans up the temp source", async () => {
     spawnMock.mockImplementation((_command, args) => {
       const proc = new FakeChildProcess()
