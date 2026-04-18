@@ -27,7 +27,7 @@
     "dev": "pnpm vite",
     "build": "pnpm tsup",
     "lint": "pnpm oxlint",
-    "format": "opnpm xfmt",
+    "format": "pnpm oxfmt",
     "format:check": "pnpm oxfmt --check",
     "typecheck": "pnpm tsc --noEmit",
     "test": "pnpm vitest run"

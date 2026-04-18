@@ -10,18 +10,19 @@ export default defineConfig({
     etherna({
       portless: true,
       mongo: true,
-      elastic: true,
-      bee: true,
-      beehive: true,
+      elastic: false,
+      bee: false,
+      beehive: false,
       sso: true,
       credit: true,
-      index: true,
-      gateway: true,
-      shkeeper: {
-        ethereum: {
-          githubRepo: "mattiaz9/ethereum-shkeeper",
-        },
-      },
+      index: false,
+      gateway: false,
+      shkeeper: false,
+      // shkeeper: {
+      //   ethereum: {
+      //     githubRepo: "mattiaz9/ethereum-shkeeper",
+      //   },
+      // },
     }),
   ],
 })
