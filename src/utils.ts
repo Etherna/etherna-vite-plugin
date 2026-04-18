@@ -6,6 +6,82 @@ import { DEFAULT_CACHE_DIR } from "./consts"
 
 import type { SpawnOptionsWithoutStdio } from "node:child_process"
 
+/** ShKeeper core container name (see `startShkeeperCoreContainer` in docker.ts). */
+const SHKEEPER_CORE_CONTAINER_NAME = "shkeeper"
+
+/** SQLite DB path inside the ShKeeper core container. */
+const SHKEEPER_INSTANCE_SQLITE_PATH = "/shkeeper.io/instance/shkeeper.sqlite"
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+}
+
+export interface FetchFirstShkeeperWalletApiKeyOptions {
+  /** Docker container running ShKeeper core (default: `shkeeper`). */
+  containerName?: string
+  /** Path to `shkeeper.sqlite` inside that container. */
+  sqlitePath?: string
+  /** Max polling attempts when the DB or row is not ready yet (default: 120). */
+  maxAttempts?: number
+  /** Delay between attempts in ms (default: 1000). */
+  intervalMs?: number
+}
+
+/**
+ * Reads the first non-empty `apikey` from ShKeeper's instance SQLite (`wallet` table).
+ * Uses `docker exec` + `sqlite3` in the running core container — no extra npm deps.
+ * Polls until a row exists or attempts are exhausted (ShKeeper may populate the DB after startup).
+ */
+export async function fetchFirstShkeeperWalletApiKey(
+  options?: FetchFirstShkeeperWalletApiKeyOptions,
+): Promise<string | null> {
+  const containerName = options?.containerName ?? SHKEEPER_CORE_CONTAINER_NAME
+  const sqlitePath = options?.sqlitePath ?? SHKEEPER_INSTANCE_SQLITE_PATH
+  const maxAttempts = options?.maxAttempts ?? 120
+  const intervalMs = options?.intervalMs ?? 1000
+
+  const sql =
+    "SELECT apikey FROM wallet WHERE apikey IS NOT NULL AND TRIM(COALESCE(apikey, '')) != '' LIMIT 1"
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const value = await runDockerSqliteScalar(containerName, sqlitePath, sql)
+    if (value) {
+      return value
+    }
+    if (attempt < maxAttempts - 1) {
+      await sleep(intervalMs)
+    }
+  }
+
+  return null
+}
+
+function runDockerSqliteScalar(
+  containerName: string,
+  sqlitePath: string,
+  sql: string,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const proc = spawn("docker", ["exec", containerName, "sqlite3", sqlitePath, sql])
+
+    let stdout = ""
+    proc.stdout?.on("data", (chunk: Buffer | string) => {
+      stdout += typeof chunk === "string" ? chunk : chunk.toString("utf8")
+    })
+    proc.on("error", () => {
+      resolve(null)
+    })
+    proc.on("close", (code: number | null) => {
+      if (code !== 0) {
+        resolve(null)
+        return
+      }
+      const trimmed = stdout.trim()
+      resolve(trimmed.length > 0 ? trimmed : null)
+    })
+  })
+}
+
 export function resolvePath(...paths: string[]) {
   return path.resolve(DEFAULT_CACHE_DIR, ...paths)
 }

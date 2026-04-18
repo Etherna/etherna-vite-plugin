@@ -1,5 +1,6 @@
 import chalk from "chalk"
 
+import { assertValidGithubRepo, resolveShkeeperImageName } from "./builder"
 import {
   ensureDockerReady,
   isBlockchainBootstrapInProgress,
@@ -8,6 +9,7 @@ import {
   startBlockchain,
   startElasticContainer,
   startMongoDbContainer,
+  startShkeeperStack,
   waitForBlockchainBootstrapToSettle,
 } from "./docker"
 import {
@@ -27,6 +29,7 @@ import {
   stopPortlessProxy,
 } from "./portless"
 import { generateSslCertificate } from "./ssl"
+import { fetchFirstShkeeperWalletApiKey } from "./utils"
 
 import type {
   BeeEnv,
@@ -37,6 +40,8 @@ import type {
   IndexEnv,
   MongoEnv,
   ServiceEnvBuildContext,
+  ShkeeperEnv,
+  ShkeeperEthereumEnv,
   SsoEnv,
 } from "./envs"
 import type { PortlessServiceAlias } from "./portless"
@@ -53,8 +58,12 @@ export type {
   IndexEnv,
   MongoEnv,
   ServiceEnvBuildContext,
+  ShkeeperEnv,
+  ShkeeperEthereumEnv,
   SsoEnv,
 } from "./envs"
+
+export { DEFAULT_GITHUB_BRANCH } from "./builder"
 
 interface ServiceEnvByKey {
   elastic: ElasticEnv
@@ -74,6 +83,29 @@ interface ServiceConfig<TEnv> {
   env?: TEnv
 }
 
+/**
+ * When `githubRepo` is set (`owner/repo`), the plugin builds SHKeeper core from that repository and tags the image as
+ * `etherna/shkeeper:…` (same version tag as the default upstream image).
+ */
+export interface ShkeeperBuildConfig {
+  githubRepo?: string
+  /** Branch or tag to clone when `githubRepo` is set (defaults to `main`). Ignored for the default upstream build. */
+  githubBranch?: string
+}
+
+export interface ShkeeperEthereumConfig {
+  env?: ShkeeperEthereumEnv
+  /** When set, build the adapter from this repo and run `etherna/ethereum-shkeeper:…` instead of the upstream image. */
+  githubRepo?: string
+  /** Branch or tag to clone when `githubRepo` is set (defaults to `main`). */
+  githubBranch?: string
+}
+
+export interface ShkeeperConfig extends ServiceConfig<ShkeeperEnv> {
+  build?: ShkeeperBuildConfig
+  ethereum?: ShkeeperEthereumConfig
+}
+
 export interface DockerPluginOptions {
   https?: boolean
   enabled?: boolean
@@ -87,6 +119,7 @@ export interface DockerPluginOptions {
   gateway?: boolean | ServiceConfig<GatewayEnv>
   credit?: boolean | ServiceConfig<CreditEnv>
   beehive?: boolean | ServiceConfig<BeehiveEnv>
+  shkeeper?: boolean | ShkeeperConfig
 }
 
 function getDevServerPort(server: ViteDevServer, fallbackPort: number): number {
@@ -163,6 +196,38 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     return typeof o === "object" && o !== null ? (o.env ?? {}) : {}
   }
 
+  const isShkeeperEnabled = () => {
+    if (options.shkeeper === true) {
+      return true
+    }
+
+    return typeof options.shkeeper === "object" && options.shkeeper !== null
+      ? options.shkeeper.enabled !== false
+      : false
+  }
+
+  const getShkeeperConfig = (): ShkeeperConfig => {
+    if (options.shkeeper === true) {
+      return {}
+    }
+
+    return typeof options.shkeeper === "object" && options.shkeeper !== null ? options.shkeeper : {}
+  }
+
+  const getShkeeperBuild = () => {
+    const build = getShkeeperConfig().build
+    const githubRepo = build?.githubRepo?.trim()
+    if (githubRepo) {
+      assertValidGithubRepo(githubRepo)
+    }
+
+    return {
+      githubRepo: githubRepo || undefined,
+      githubBranch: build?.githubBranch?.trim() || undefined,
+      imageName: resolveShkeeperImageName(githubRepo || undefined),
+    }
+  }
+
   process.on("SIGINT", () => {
     process.stdin.resume()
     void (async () => {
@@ -211,9 +276,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           mode,
           portless: Boolean(options.portless),
           appPort,
-          ...(options.portless && portlessAppPublicUrl
-            ? { portlessAppPublicUrl }
-            : {}),
+          ...(options.portless && portlessAppPublicUrl ? { portlessAppPublicUrl } : {}),
         }
 
         if (options.portless) {
@@ -340,6 +403,27 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               }
             })
         }
+        if (isShkeeperEnabled()) {
+          const sk = getShkeeperConfig()
+          const ethRepo = sk.ethereum?.githubRepo?.trim()
+          if (ethRepo) {
+            assertValidGithubRepo(ethRepo)
+          }
+          void startShkeeperStack({
+            context: serviceCtx,
+            build: getShkeeperBuild(),
+            coreEnv: sk.env,
+            ethereumEnv: sk.ethereum?.env,
+            ethereumGithubRepo: ethRepo || undefined,
+            ethereumGithubBranch: sk.ethereum?.githubBranch?.trim() || undefined,
+          })
+            .then((procs) => spawns.push(...procs))
+            .catch((error: unknown) => {
+              if (!shutdownRequested) {
+                throw error
+              }
+            })
+        }
         if (isServiceEnabled("elastic")) {
           void startElasticContainer(getServiceEnv("elastic"), serviceCtx).then((p) =>
             spawns.push(p),
@@ -383,18 +467,32 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           ).then((p) => spawns.push(p))
         }
         if (isServiceEnabled("credit")) {
-          void startAspContainer(
-            "etherna-credit",
-            "etherna/etherna-credit:latest",
-            serviceCtx,
-            getServiceEnv("credit"),
-          ).then((p) => spawns.push(p))
+          void (async () => {
+            let creditEnv = getServiceEnv("credit")
+            if (isShkeeperEnabled()) {
+              const apiKey = await fetchFirstShkeeperWalletApiKey()
+              if (apiKey) {
+                creditEnv = { ...creditEnv, "Payments:ShKeeper:ApiKey": apiKey }
+              }
+            }
+            const p = await startAspContainer(
+              "etherna-credit",
+              "etherna/etherna-credit:latest",
+              serviceCtx,
+              creditEnv,
+            )
+            spawns.push(p)
+          })().catch((error: unknown) => {
+            if (!shutdownRequested) {
+              throw error
+            }
+          })
         }
       })
 
       // Stop containers when dev server is closed
-      server.httpServer?.once("close", () => {
-        void shutdownServices(false)
+      server.httpServer?.once("close", async () => {
+        await shutdownServices(false)
       })
     },
   }

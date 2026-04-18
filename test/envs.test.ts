@@ -3,6 +3,22 @@ import { describe, expect, it } from "vitest"
 import { buildServiceEnvs, parsePortFromAspNetCoreUrls } from "../src/envs.ts"
 
 describe("buildServiceEnvs", () => {
+  it("builds a docker-only ETH profile for shkeeper with localhost service discovery", () => {
+    const envs = buildServiceEnvs({ mode: "http", portless: false, appPort: 5174 })
+
+    expect(envs.shkeeper.port).toBe(32650)
+    expect(envs["shkeeper-core"].ETH_WALLET).toBe("enabled")
+    expect(envs["shkeeper-core"].BTC_WALLET).toBe("disabled")
+    expect(envs["shkeeper-core"].ETHEREUM_API_SERVER_HOST).toBe("localhost")
+    expect(envs["shkeeper-core"].ETHEREUM_SERVER_PORT).toBe("6000")
+    expect(envs["ethereum-shkeeper"].FULLNODE_URL).toBe("http://localhost:9545")
+    expect(envs["ethereum-shkeeper"].SHKEEPER_HOST).toBe("localhost:32650")
+    expect(envs["ethereum-shkeeper"].REDIS_HOST).toBe("localhost")
+    expect(envs["ethereum-shkeeper"].SQLALCHEMY_DATABASE_URI).toBe(
+      "mariadb+pymysql://root:shkeeper@localhost:3306/ethereum-shkeeper?charset=utf8mb4",
+    )
+  })
+
   it("uses localhost for bind and public URLs when portless is off", () => {
     const envs = buildServiceEnvs({ mode: "http", portless: false, appPort: 5174 })
     expect(envs["etherna-sso"].ASPNETCORE_URLS).toBe("http://localhost:32610")
@@ -33,7 +49,9 @@ describe("buildServiceEnvs", () => {
 
   it("uses portless only for browser-facing client base URLs when portless is on", () => {
     const envs = buildServiceEnvs({ mode: "http", portless: true, appPort: 9999 })
-    expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe("http://app.localhost:1355")
+    expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe(
+      "http://app.localhost:1355",
+    )
     expect(envs["etherna-sso"]["IdServer:Clients:EthernaIndex:BaseUrl"]).toBe(
       "http://index.localhost:1355",
     )
@@ -55,6 +73,8 @@ describe("buildServiceEnvs", () => {
 describe("parsePortFromAspNetCoreUrls", () => {
   it("parses port from the first binding URL", () => {
     expect(parsePortFromAspNetCoreUrls("http://localhost:32610")).toBe("32610")
-    expect(parsePortFromAspNetCoreUrls("http://localhost:32610;http://127.0.0.1:32610")).toBe("32610")
+    expect(parsePortFromAspNetCoreUrls("http://localhost:32610;http://127.0.0.1:32610")).toBe(
+      "32610",
+    )
   })
 })
