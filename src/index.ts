@@ -1,16 +1,20 @@
 import chalk from "chalk"
 
-import { assertValidGithubRepo, resolveShkeeperImageName } from "./builder"
+import { assertValidGithubRepo } from "./builder"
+import {
+  applyEthernaPluginHttpsFallback,
+  getDevServerPort,
+  harnessEthernaPlugin,
+  type DockerPluginOptions,
+} from "./plugin-define"
 import {
   ensureDockerReady,
-  isBlockchainBootstrapInProgress,
   startAspContainer,
   startBeeNodes,
   startBlockchain,
   startElasticContainer,
   startMongoDbContainer,
   startShkeeperStack,
-  waitForBlockchainBootstrapToSettle,
 } from "./docker"
 import {
   buildServiceEnvs,
@@ -25,28 +29,14 @@ import {
   normalizePortlessAppPublicUrl,
   PORTLESS_URL_ENV,
   registerPortlessAliases,
-  removePortlessAliases,
-  stopPortlessProxy,
 } from "./portless"
 import { generateSslCertificate } from "./ssl"
 import { fetchFirstShkeeperWalletApiKey } from "./utils"
 
-import type {
-  BeeEnv,
-  BeehiveEnv,
-  CreditEnv,
-  ElasticEnv,
-  GatewayEnv,
-  IndexEnv,
-  MongoEnv,
-  ServiceEnvBuildContext,
-  ShkeeperEnv,
-  ShkeeperEthereumEnv,
-  SsoEnv,
-} from "./envs"
+import type { ServiceEnvBuildContext } from "./envs"
 import type { PortlessServiceAlias } from "./portless"
 import type { ChildProcess } from "node:child_process"
-import type { Plugin, ServerOptions, ViteDevServer } from "vite"
+import type { Plugin, ServerOptions } from "vite"
 
 export type {
   AspServiceEnv,
@@ -65,180 +55,41 @@ export type {
 
 export { DEFAULT_GITHUB_BRANCH } from "./builder"
 
-interface ServiceEnvByKey {
-  elastic: ElasticEnv
-  mongo: MongoEnv
-  bee: BeeEnv
-  sso: SsoEnv
-  index: IndexEnv
-  gateway: GatewayEnv
-  credit: CreditEnv
-  beehive: BeehiveEnv
-}
+export type {
+  DockerPluginOptions,
+  EthernaPluginHarness,
+  ServiceConfig,
+  ServiceKey,
+  ShkeeperBuildConfig,
+  ShkeeperConfig,
+  ShkeeperEthereumConfig,
+} from "./plugin-define"
 
-export type ServiceKey = keyof ServiceEnvByKey
-
-interface ServiceConfig<TEnv> {
-  enabled?: boolean
-  env?: TEnv
-}
-
-/**
- * When `githubRepo` is set (`owner/repo`), the plugin builds SHKeeper core from that repository and tags the image as
- * `etherna/shkeeper:…` (same version tag as the default upstream image).
- */
-export interface ShkeeperBuildConfig {
-  githubRepo?: string
-  /** Branch or tag to clone when `githubRepo` is set (defaults to `main`). Ignored for the default upstream build. */
-  githubBranch?: string
-}
-
-export interface ShkeeperEthereumConfig {
-  env?: ShkeeperEthereumEnv
-  /** When set, build the adapter from this repo and run `etherna/ethereum-shkeeper:…` instead of the upstream image. */
-  githubRepo?: string
-  /** Branch or tag to clone when `githubRepo` is set (defaults to `main`). */
-  githubBranch?: string
-}
-
-export interface ShkeeperConfig extends ServiceConfig<ShkeeperEnv> {
-  build?: ShkeeperBuildConfig
-  ethereum?: ShkeeperEthereumConfig
-}
-
-export interface DockerPluginOptions {
-  https?: boolean
-  enabled?: boolean
-  /** When true, starts Portless on HTTP port 1355 and registers friendly `*.localhost` URLs for the app and enabled HTTP services. */
-  portless?: boolean
-  elastic?: boolean | ServiceConfig<ElasticEnv>
-  mongo?: boolean | ServiceConfig<MongoEnv>
-  bee?: boolean | ServiceConfig<BeeEnv>
-  sso?: boolean | ServiceConfig<SsoEnv>
-  index?: boolean | ServiceConfig<IndexEnv>
-  gateway?: boolean | ServiceConfig<GatewayEnv>
-  credit?: boolean | ServiceConfig<CreditEnv>
-  beehive?: boolean | ServiceConfig<BeehiveEnv>
-  shkeeper?: boolean | ShkeeperConfig
-}
-
-function getDevServerPort(server: ViteDevServer, fallbackPort: number): number {
-  const addr = server.httpServer?.address()
-  if (addr && typeof addr === "object" && "port" in addr && typeof addr.port === "number") {
-    return addr.port
-  }
-  return fallbackPort
-}
+export {
+  applyEthernaPluginHttpsFallback,
+  defineEthernaPlugin,
+  getDevServerPort,
+  harnessEthernaPlugin,
+} from "./plugin-define"
 
 export function etherna(options: DockerPluginOptions = {}): Plugin {
-  const spawns = [] as ChildProcess[]
+  const harness = harnessEthernaPlugin(options)
+  applyEthernaPluginHttpsFallback(options)
+  harness.installProcessSignalHandlers()
 
-  let portlessProxyStartedByUs = false
-  const portlessAliasesRegistered: PortlessServiceAlias[] = []
-  let shutdownRequested = false
-  let shutdownInProgress = false
-
-  if (options.https) {
-    options.https = false
-    console.log(chalk.yellow(`  HTTPS not supported yet. Falling back to HTTP.`))
-  }
-
-  const cleanupPortless = async () => {
-    if (portlessAliasesRegistered.length > 0) {
-      await removePortlessAliases(portlessAliasesRegistered)
-      portlessAliasesRegistered.length = 0
-    }
-    if (portlessProxyStartedByUs) {
-      await stopPortlessProxy()
-    }
-    portlessProxyStartedByUs = false
-  }
-
-  // kill all spawned containers on process exit
-  const killSpawns = () => {
-    for (const proc of spawns) {
-      proc.kill()
-    }
-  }
-
-  const shutdownServices = async (exitProcess = false, force = false) => {
-    shutdownRequested = true
-
-    if (shutdownInProgress && !force) {
-      return
-    }
-    shutdownInProgress = true
-
-    if (!force && isBlockchainBootstrapInProgress()) {
-      console.log(
-        chalk.yellow(
-          `  ➜  ${chalk.bold("etherna-blockchain")}:   Shutdown requested during blockchain initialization. Waiting for a safe shutdown point. Press Ctrl+C again to force exit.`,
-        ),
-      )
-      await waitForBlockchainBootstrapToSettle()
-    }
-
-    await cleanupPortless()
-    killSpawns()
-    if (exitProcess) {
-      process.exit(0)
-    }
-  }
-
-  const isServiceEnabled = (service: ServiceKey) => {
-    return typeof options[service] === "object"
-      ? options[service]?.enabled !== false
-      : options[service] !== false
-  }
-
-  const getServiceEnv = <K extends ServiceKey>(service: K): ServiceEnvByKey[K] => {
-    const o = options[service]
-    return typeof o === "object" && o !== null ? (o.env ?? {}) : {}
-  }
-
-  const isShkeeperEnabled = () => {
-    if (options.shkeeper === true) {
-      return true
-    }
-
-    return typeof options.shkeeper === "object" && options.shkeeper !== null
-      ? options.shkeeper.enabled !== false
-      : false
-  }
-
-  const getShkeeperConfig = (): ShkeeperConfig => {
-    if (options.shkeeper === true) {
-      return {}
-    }
-
-    return typeof options.shkeeper === "object" && options.shkeeper !== null ? options.shkeeper : {}
-  }
-
-  const getShkeeperBuild = () => {
-    const build = getShkeeperConfig().build
-    const githubRepo = build?.githubRepo?.trim()
-    if (githubRepo) {
-      assertValidGithubRepo(githubRepo)
-    }
-
-    return {
-      githubRepo: githubRepo || undefined,
-      githubBranch: build?.githubBranch?.trim() || undefined,
-      imageName: resolveShkeeperImageName(githubRepo || undefined),
-    }
-  }
-
-  process.on("SIGINT", () => {
-    process.stdin.resume()
-    void (async () => {
-      await shutdownServices(true, shutdownRequested)
-    })()
-  })
-  process.on("SIGTERM", () => {
-    void (async () => {
-      await shutdownServices(false, shutdownRequested)
-    })()
-  })
+  const {
+    isServiceEnabled,
+    getServiceEnv,
+    isShkeeperEnabled,
+    getShkeeperConfig,
+    getShkeeperBuild,
+    isShutdownRequested,
+    pushSpawn,
+    setPortlessProxyStartedByUs,
+    recordPortlessAliases,
+    cleanupPortless,
+    shutdownServices,
+  } = harness
 
   return {
     name: "etherna:vite-plugin",
@@ -290,7 +141,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           }
           try {
             const { startedByUs } = await ensurePortlessProxy()
-            portlessProxyStartedByUs = startedByUs
+            setPortlessProxyStartedByUs(startedByUs)
           } catch (e) {
             console.error(
               chalk.red(
@@ -362,7 +213,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
 
           try {
             await registerPortlessAliases(aliasEntries)
-            portlessAliasesRegistered.push(...aliasEntries.map((e) => e.name))
+            recordPortlessAliases(aliasEntries.map((e) => e.name))
           } catch (e) {
             console.error(
               chalk.red(
@@ -385,20 +236,20 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         if (isServiceEnabled("bee")) {
           void startBlockchain(serviceCtx, getServiceEnv("bee"))
             .then((p) => {
-              spawns.push(p)
-              if (shutdownRequested) {
+              pushSpawn(p)
+              if (isShutdownRequested()) {
                 return [] as ChildProcess[]
               }
               return startBeeNodes(serviceCtx, getServiceEnv("bee"))
             })
             .then((procs) => {
-              if (shutdownRequested) {
+              if (isShutdownRequested()) {
                 return
               }
-              spawns.push(...procs)
+              pushSpawn(...procs)
             })
             .catch((error: unknown) => {
-              if (!shutdownRequested) {
+              if (!isShutdownRequested()) {
                 throw error
               }
             })
@@ -417,20 +268,18 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             ethereumGithubRepo: ethRepo || undefined,
             ethereumGithubBranch: sk.ethereum?.githubBranch?.trim() || undefined,
           })
-            .then((procs) => spawns.push(...procs))
+            .then((procs) => pushSpawn(...procs))
             .catch((error: unknown) => {
-              if (!shutdownRequested) {
+              if (!isShutdownRequested()) {
                 throw error
               }
             })
         }
         if (isServiceEnabled("elastic")) {
-          void startElasticContainer(getServiceEnv("elastic"), serviceCtx).then((p) =>
-            spawns.push(p),
-          )
+          void startElasticContainer(getServiceEnv("elastic"), serviceCtx).then((p) => pushSpawn(p))
         }
         if (isServiceEnabled("mongo")) {
-          spawns.push(await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx))
+          pushSpawn(await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx))
         }
         if (isServiceEnabled("beehive")) {
           void startAspContainer(
@@ -438,7 +287,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             "etherna/beehive-manager:latest",
             serviceCtx,
             getServiceEnv("beehive"),
-          ).then((p) => spawns.push(p))
+          ).then((p) => pushSpawn(p))
         }
         if (isServiceEnabled("index")) {
           void startAspContainer(
@@ -446,10 +295,10 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             "etherna/etherna-index:latest",
             serviceCtx,
             getServiceEnv("index"),
-          ).then((p) => spawns.push(p))
+          ).then((p) => pushSpawn(p))
         }
         if (isServiceEnabled("sso")) {
-          spawns.push(
+          pushSpawn(
             await startAspContainer(
               "etherna-sso",
               "etherna/etherna-sso:latest",
@@ -464,7 +313,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
             "etherna/etherna-gateway:latest",
             serviceCtx,
             getServiceEnv("gateway"),
-          ).then((p) => spawns.push(p))
+          ).then((p) => pushSpawn(p))
         }
         if (isServiceEnabled("credit")) {
           void (async () => {
@@ -481,9 +330,9 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               serviceCtx,
               creditEnv,
             )
-            spawns.push(p)
+            pushSpawn(p)
           })().catch((error: unknown) => {
-            if (!shutdownRequested) {
+            if (!isShutdownRequested()) {
               throw error
             }
           })
