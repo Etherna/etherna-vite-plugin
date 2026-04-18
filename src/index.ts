@@ -370,12 +370,12 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               onFailure: "stop",
               beforeStartup: options.portless
                 ? async () => {
-                    const beeBase = getEnv("etherna-bee", serviceCtx) ?? {}
-                    await recordPortlessAlias(
-                      "bee",
-                      { ...beeBase, ...getServiceEnv("bee") }.BEE_PORT ?? 1633,
-                    )
-                  }
+                  const beeBase = getEnv("etherna-bee", serviceCtx) ?? {}
+                  await recordPortlessAlias(
+                    "bee",
+                    { ...beeBase, ...getServiceEnv("bee") }.BEE_PORT ?? 1633,
+                  )
+                }
                 : undefined,
               startupCallback: startup.startBeeBlockchain,
             },
@@ -390,6 +390,14 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               code: "shkeeper",
               enabled: isShkeeperEnabled(),
               onFailure: "stop",
+              beforeStartup: options.portless
+                ? async () => {
+                  await recordPortlessAlias(
+                    "shkeeper",
+                    getEnv("shkeeper", serviceCtx).port,
+                  )
+                }
+                : undefined,
               startupCallback: startup.startShkeeper,
             },
             {
@@ -406,11 +414,11 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               beforeStartup:
                 options.portless && envs
                   ? async () => {
-                      await recordPortlessAlias(
-                        "sso",
-                        parsePortFromAspNetCoreUrls(String(envs["etherna-sso"].ASPNETCORE_URLS)),
-                      )
-                    }
+                    await recordPortlessAlias(
+                      "sso",
+                      parsePortFromAspNetCoreUrls(String(envs["etherna-sso"].ASPNETCORE_URLS)),
+                    )
+                  }
                   : undefined,
               startupCallback: startup.startSso,
             },
@@ -422,11 +430,11 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               beforeStartup:
                 options.portless && envs
                   ? async () => {
-                      await recordPortlessAlias(
-                        "index",
-                        parsePortFromAspNetCoreUrls(String(envs["etherna-index"].ASPNETCORE_URLS)),
-                      )
-                    }
+                    await recordPortlessAlias(
+                      "index",
+                      parsePortFromAspNetCoreUrls(String(envs["etherna-index"].ASPNETCORE_URLS)),
+                    )
+                  }
                   : undefined,
               startupCallback: startup.startIndex,
             },
@@ -438,13 +446,13 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               beforeStartup:
                 options.portless && envs
                   ? async () => {
-                      await recordPortlessAlias(
-                        "beehive",
-                        parsePortFromAspNetCoreUrls(
-                          String(envs["etherna-beehive-manager"].ASPNETCORE_URLS),
-                        ),
-                      )
-                    }
+                    await recordPortlessAlias(
+                      "beehive",
+                      parsePortFromAspNetCoreUrls(
+                        String(envs["etherna-beehive-manager"].ASPNETCORE_URLS),
+                      ),
+                    )
+                  }
                   : undefined,
               startupCallback: startup.startBeehive,
             },
@@ -456,13 +464,13 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               beforeStartup:
                 options.portless && envs
                   ? async () => {
-                      await recordPortlessAlias(
-                        "gateway",
-                        parsePortFromAspNetCoreUrls(
-                          String(envs["etherna-gateway"].ASPNETCORE_URLS),
-                        ),
-                      )
-                    }
+                    await recordPortlessAlias(
+                      "gateway",
+                      parsePortFromAspNetCoreUrls(
+                        String(envs["etherna-gateway"].ASPNETCORE_URLS),
+                      ),
+                    )
+                  }
                   : undefined,
               startupCallback: startup.startGateway,
             },
@@ -474,11 +482,11 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
               beforeStartup:
                 options.portless && envs
                   ? async () => {
-                      await recordPortlessAlias(
-                        "credit",
-                        parsePortFromAspNetCoreUrls(String(envs["etherna-credit"].ASPNETCORE_URLS)),
-                      )
-                    }
+                    await recordPortlessAlias(
+                      "credit",
+                      parsePortFromAspNetCoreUrls(String(envs["etherna-credit"].ASPNETCORE_URLS)),
+                    )
+                  }
                   : undefined,
               startupCallback: startup.startCredit,
             },

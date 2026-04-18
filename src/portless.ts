@@ -12,6 +12,7 @@ export type PortlessServiceAlias =
   | "gateway"
   | "beehive"
   | "bee"
+  | "shkeeper"
 
 export const PORTLESS_CONTAINER_ALIASES: Record<string, PortlessServiceAlias> = {
   "etherna-sso": "sso",
