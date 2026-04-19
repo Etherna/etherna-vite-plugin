@@ -1,4 +1,5 @@
 import chalk from "chalk"
+import { loadEnv } from "vite"
 
 import { assertValidGithubRepo } from "./builder"
 import { createDependenciesTree } from "./dependencies-tree"
@@ -33,7 +34,7 @@ import {
   PORTLESS_URL_ENV,
 } from "./portless"
 import { generateSslCertificate } from "./ssl"
-import { fetchFirstShkeeperWalletApiKey, logError } from "./utils"
+import { fetchFirstShkeeperWalletApiKey, getEnvVar, logError } from "./utils"
 
 import type { ServiceEnvBuildContext } from "./envs"
 import type { ChildProcess } from "node:child_process"
@@ -90,6 +91,9 @@ export {
 } from "./dependencies-tree"
 
 export { addPortlessAlias, parsePortlessPort } from "./portless"
+
+/** Prefixes loaded from `.env` files into `process.env` by the plugin's `config` hook. */
+const ETHERNA_ENV_PREFIXES: string[] = ["ETHERNA_", "PORTLESS_"]
 
 type EthernaStartupHandlers = {
   startBeeBlockchain: () => Promise<boolean>
@@ -287,6 +291,18 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
   return {
     name: "etherna:vite-plugin",
     apply: "serve",
+    config(userConfig, { mode }) {
+      // Vite doesn't auto-populate `process.env` from `.env` files (those are loaded
+      // into client-side `import.meta.env` and filtered by `envPrefix`). The plugin
+      // runs in Node and only reads a small, well-known set of variables, so we
+      // restrict the merge to those prefixes — keeps the user's other secrets out
+      // of `process.env` and avoids cross-plugin contamination.
+      const envDir = userConfig.envDir ?? userConfig.root ?? process.cwd()
+      const fileEnv = loadEnv(mode, envDir, ETHERNA_ENV_PREFIXES)
+      for (const [key, value] of Object.entries(fileEnv)) {
+        process.env[key] ??= value
+      }
+    },
     async configResolved(config) {
       if (options.https) {
         const { cert, key } = await generateSslCertificate()
@@ -315,7 +331,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         const fallbackPort = getEnv("app", defaultServiceEnvBuildContext(mode)).port
         const appPort = getDevServerPort(server, fallbackPort)
 
-        const portlessAppPublicUrl = process.env[PORTLESS_URL_ENV]?.trim()
+        const portlessAppPublicUrl = getEnvVar(PORTLESS_URL_ENV)?.trim()
         const serviceCtx: ServiceEnvBuildContext = {
           mode,
           portless: Boolean(options.portless),

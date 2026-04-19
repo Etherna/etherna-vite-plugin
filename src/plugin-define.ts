@@ -3,6 +3,7 @@ import chalk from "chalk"
 import { assertValidGithubRepo, resolveShkeeperImageName } from "./builder"
 import { isBlockchainBootstrapInProgress, waitForBlockchainBootstrapToSettle } from "./docker"
 import { addPortlessAlias, removePortlessAliases, stopPortlessProxy } from "./portless"
+import { getEnvVar } from "./utils"
 
 import type {
   BeeEnv,
@@ -71,14 +72,8 @@ export function resolveDetachedMode(options: DockerPluginOptions): boolean {
   if (typeof options.detached === "boolean") {
     return options.detached
   }
-  const raw = process.env[ETHERNA_DETACHED_ENV]?.trim().toLowerCase()
-  if (raw === "1" || raw === "true" || raw === "yes") {
-    return true
-  }
-  if (raw === "0" || raw === "false" || raw === "no") {
-    return false
-  }
-  return false
+  const raw = getEnvVar(ETHERNA_DETACHED_ENV)?.trim().toLowerCase()
+  return raw === "1" || raw === "true" || raw === "yes"
 }
 
 export interface DockerPluginOptions {
@@ -151,7 +146,8 @@ export interface EthernaPluginHarness {
 
 /** Option helpers plus portless cleanup, child-process tracking, and shutdown (closure per plugin instance). */
 export function harnessEthernaPlugin(options: DockerPluginOptions) {
-  const detached = resolveDetachedMode(options)
+  // Resolved lazily so envs loaded by the plugin's `config` hook (via Vite's `loadEnv`) are picked up.
+  const getDetached = () => resolveDetachedMode(options)
   const spawns: ChildProcess[] = []
   let portlessProxyStartedByUs = false
   const portlessAliasesRegistered: PortlessServiceAlias[] = []
@@ -240,7 +236,7 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
     }
 
     await cleanupPortless()
-    const killTracked = opts?.killTrackedSpawns ?? !detached
+    const killTracked = opts?.killTrackedSpawns ?? !getDetached()
     if (killTracked) {
       killSpawns()
     }
@@ -283,7 +279,7 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
     },
     cleanupPortless,
     killSpawns,
-    getDetached: () => detached,
+    getDetached,
     shutdownServices,
     installProcessSignalHandlers,
   } satisfies EthernaPluginHarness

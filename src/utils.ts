@@ -82,6 +82,30 @@ function runDockerSqliteScalar(
   })
 }
 
+/**
+ * Reads an env variable from both `process.env` and `import.meta.env`.
+ *
+ * `process.env` takes precedence (shell-set vars and CI environments win over
+ * Vite's `.env` files). The `etherna` plugin's `config` hook already merges
+ * `.env` values into `process.env` via Vite's `loadEnv`, so the
+ * `import.meta.env` branch is mainly a safety net for callers that import
+ * helpers from this package outside of the plugin's lifecycle.
+ */
+export function getEnvVar(key: string): string | undefined {
+  const fromProcess = typeof process !== "undefined" ? process.env?.[key] : undefined
+  if (fromProcess !== undefined) {
+    return fromProcess
+  }
+
+  try {
+    const meta = (import.meta as ImportMeta & { env?: Record<string, unknown> }).env
+    const value = meta?.[key]
+    return typeof value === "string" ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function resolvePath(...paths: string[]) {
   return path.resolve(DEFAULT_CACHE_DIR, ...paths)
 }
