@@ -10,13 +10,13 @@ export default defineConfig({
     etherna({
       portless: true,
       mongo: true,
-      elastic: false,
-      bee: false,
-      beehive: false,
+      elastic: true,
+      bee: true,
+      beehive: true,
       sso: true,
       credit: true,
-      index: false,
-      gateway: false,
+      index: true,
+      gateway: true,
       shkeeper: false,
       // shkeeper: {
       //   ethereum: {

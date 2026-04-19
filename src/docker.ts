@@ -2,15 +2,21 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import chalk from "chalk"
 
-import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
-import { defaultServiceEnvBuildContext, getEnv } from "./envs"
-import { getPortlessPublicUrl, PORTLESS_CONTAINER_ALIASES } from "./portless"
-import { trustContainerCertificate } from "./ssl"
 import {
   ensureEthereumShkeeperDockerImage,
   ensureShkeeperDockerImage,
   resolveEthereumShkeeperImageName,
 } from "./builder"
+import { CERTIFICATE_DIR, CONTAINER_CERTS_DIR } from "./consts"
+import {
+  BLOCKCHAIN_OWNER_ADDRESS,
+  defaultServiceEnvBuildContext,
+  getEnv,
+  POSTAGE_STAMP_ADMIN_PRIVATE_KEY,
+  stripPluginInternalEnvKeys,
+} from "./envs"
+import { getPortlessPublicUrl, PORTLESS_CONTAINER_ALIASES } from "./portless"
+import { trustContainerCertificate } from "./ssl"
 import {
   getBeeUnderlayAddress,
   logError,
@@ -19,6 +25,19 @@ import {
   resolvePath,
   resolvePathEscape,
 } from "./utils"
+import {
+  decodeUint,
+  encodeAddressParam,
+  encodeBytes32Param,
+  encodeUintParam,
+  ethJsonRpc,
+  getEthereumBlockNumber,
+  getEthereumCode,
+  getFunctionSelector,
+  isEthereumCodeDeployed,
+  privateKeyToAddress,
+  sendSignedTransaction,
+} from "./web3"
 
 import type {
   AspServiceEnv,
@@ -48,6 +67,10 @@ const BEE_REQUIRED_CONTRACT_ENV_KEYS = [
   "BEE_REDISTRIBUTION_ADDRESS",
   "BEE_STAKING_ADDRESS",
 ] as const
+
+const POSTAGE_PRICE_SYNC_TIMEOUT_MS = 30_000
+const POSTAGE_PRICE_SYNC_POLL_MS = 500
+const POSTAGE_PRICE_SYNC_GAS_LIMIT = 200_000
 
 let blockchainBootstrapInProgress = false
 let resolveBlockchainBootstrapSettle = undefined as undefined | (() => void)
@@ -128,68 +151,171 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms))
 }
 
-async function getEthereumCode(rpcUrl: string, address: string) {
-  const resp = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+/**
+ * Reads `PostageStamp.lastPrice()` (the value Bee uses for stamp accounting)
+ * and, if it differs from `desiredPrice`, writes the new price by calling
+ * `PostageStamp.setPrice(uint256)` directly from the deployer key — bypassing
+ * the broken `PostagePriceOracle` shipped by fdp-play.
+ *
+ * Why we bypass `PostagePriceOracle`:
+ * fdp-play's `deploy.ts` calls `getPostagePriceOracleBin(erc20Address, adminAddress)`
+ * which appends BOTH addresses to the constructor calldata, but the actual
+ * `PriceOracle` constructor only takes one arg (`address _postageStamp`).
+ * Solidity silently ignores the trailing word, so the deployed oracle's
+ * `postageStamp` field ends up pointing at the BZZ token contract, not the
+ * real `PostageStamp`. Every `oracle.setPrice(...)` then internally calls
+ * `bzzToken.setPrice(...)`, which doesn't exist — depending on the exact
+ * deployed bytecode the outer tx either reverts or quietly succeeds while
+ * `PostageStamp.lastPrice` stays at 0. Either way, no role grant on the
+ * oracle can fix it.
+ *
+ * Direct `PostageStamp.setPrice(uint256)` call requires `PRICE_ORACLE_ROLE`.
+ * We grant it to the deployer first (deployer holds `DEFAULT_ADMIN_ROLE` on
+ * `PostageStamp`, set by its constructor's `_setupRole(DEFAULT_ADMIN_ROLE,
+ * msg.sender)`). The role hash is read from the contract itself
+ * (`PRICE_ORACLE_ROLE()` getter) so we transparently support both v0.5.x
+ * (`keccak256("PRICE_ORACLE")`) and v0.6.x (`keccak256("PRICE_ORACLE_ROLE")`)
+ * bytecodes.
+ *
+ * `ownerPrivateKey` MUST be the key that originally deployed `PostageStamp`
+ * (matching fdp-play's `hardhat.config.ts`). The unlocked Clique signer never
+ * deployed any contract and therefore lacks `DEFAULT_ADMIN_ROLE` everywhere.
+ * We can't go through geth's `personal_*` API either (removed from the HTTP
+ * namespace in geth ≥ 1.12), so txs are signed locally with EIP-155 and
+ * broadcast via `eth_sendRawTransaction`.
+ */
+async function ensurePostagePrice({
+  rpcUrl,
+  postageStampAddress,
+  ownerPrivateKey,
+  desiredPrice,
+}: {
+  rpcUrl: string
+  postageStampAddress: string
+  ownerPrivateKey: string
+  desiredPrice: bigint
+}): Promise<void> {
+  const name = "etherna-bee"
+  // PostageStamp stores `lastPrice` as uint64.
+  const maxPrice = (1n << 64n) - 1n
+  if (desiredPrice < 0n || desiredPrice > maxPrice) {
+    throw new Error(`POSTAGE_PRICE ${desiredPrice} is out of range for uint64 (0..${maxPrice}).`)
+  }
+
+  const [
+    lastPriceSelector,
+    setPriceSelector,
+    hasRoleSelector,
+    grantRoleSelector,
+    priceOracleRoleSelector,
+  ] = await Promise.all([
+    getFunctionSelector(rpcUrl, "lastPrice()"),
+    getFunctionSelector(rpcUrl, "setPrice(uint256)"),
+    getFunctionSelector(rpcUrl, "hasRole(bytes32,address)"),
+    getFunctionSelector(rpcUrl, "grantRole(bytes32,address)"),
+    getFunctionSelector(rpcUrl, "PRICE_ORACLE_ROLE()"),
+  ])
+
+  const readLastPrice = async () => {
+    const raw = await ethJsonRpc<string>(rpcUrl, "eth_call", [
+      { to: postageStampAddress, data: lastPriceSelector },
+      "latest",
+    ])
+    return decodeUint(raw)
+  }
+
+  const currentPrice = await readLastPrice()
+
+  if (currentPrice === desiredPrice) {
+    console.log(
+      `  ${chalk.green("➜")}  ${chalk.bold(name)}:   postage price already at ${chalk.cyan(
+        String(desiredPrice),
+      )} PLUR`,
+    )
+    return
+  }
+
+  const ownerAddress = privateKeyToAddress(ownerPrivateKey)
+
+  const roleHashRaw = await ethJsonRpc<string>(rpcUrl, "eth_call", [
+    { to: postageStampAddress, data: priceOracleRoleSelector },
+    "latest",
+  ])
+  if (!roleHashRaw || roleHashRaw === "0x") {
+    throw new Error(
+      `PostageStamp.PRICE_ORACLE_ROLE() returned no data; ${postageStampAddress} may not be a PostageStamp contract.`,
+    )
+  }
+  const roleHashEncoded = encodeBytes32Param(roleHashRaw)
+  const ownerAddressEncoded = encodeAddressParam(ownerAddress)
+
+  const hasRoleRaw = await ethJsonRpc<string>(rpcUrl, "eth_call", [
+    {
+      to: postageStampAddress,
+      data: hasRoleSelector + roleHashEncoded + ownerAddressEncoded,
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_getCode",
-      params: [address, "latest"],
-    }),
-  })
+    "latest",
+  ])
+  const ownerHasRole = decodeUint(hasRoleRaw) !== 0n
 
-  if (!resp.ok) {
-    throw new Error(`Failed to query contract code: ${resp.status} ${resp.statusText}`)
+  if (!ownerHasRole) {
+    console.log(
+      `  ${chalk.yellow("➜")}  ${chalk.bold(
+        name,
+      )}:   granting PRICE_ORACLE_ROLE on PostageStamp to ${chalk.gray(ownerAddress)}`,
+    )
+    const grantTxHash = await sendSignedTransaction(
+      rpcUrl,
+      ownerPrivateKey,
+      {
+        to: postageStampAddress,
+        data: grantRoleSelector + roleHashEncoded + ownerAddressEncoded,
+        gasLimit: BigInt(POSTAGE_PRICE_SYNC_GAS_LIMIT),
+      },
+      {
+        timeoutMs: POSTAGE_PRICE_SYNC_TIMEOUT_MS,
+        pollMs: POSTAGE_PRICE_SYNC_POLL_MS,
+        onRevert: (hash) =>
+          `PostageStamp.grantRole(PRICE_ORACLE_ROLE, ${ownerAddress}) reverted (tx ${hash}). The owner likely lacks DEFAULT_ADMIN_ROLE on PostageStamp ${postageStampAddress}.`,
+      },
+    )
+    console.log(`  ${chalk.gray(`  granted (tx ${grantTxHash})`)}`)
   }
 
-  const data = (await resp.json()) as {
-    error?: { message?: string }
-    result?: string
-  }
+  console.log(
+    `  ${chalk.yellow("➜")}  ${chalk.bold(name)}:   updating postage price ${chalk.gray(
+      String(currentPrice),
+    )} → ${chalk.cyan(String(desiredPrice))} PLUR`,
+  )
 
-  if (data.error?.message) {
-    throw new Error(data.error.message)
-  }
-
-  return data.result ?? "0x"
-}
-
-async function getEthereumBlockNumber(rpcUrl: string) {
-  const resp = await fetch(rpcUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
+  const txHash = await sendSignedTransaction(
+    rpcUrl,
+    ownerPrivateKey,
+    {
+      to: postageStampAddress,
+      data: setPriceSelector + encodeUintParam(desiredPrice),
+      gasLimit: BigInt(POSTAGE_PRICE_SYNC_GAS_LIMIT),
     },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_blockNumber",
-      params: [],
-    }),
-  })
+    {
+      timeoutMs: POSTAGE_PRICE_SYNC_TIMEOUT_MS,
+      pollMs: POSTAGE_PRICE_SYNC_POLL_MS,
+      onRevert: (hash) =>
+        `PostageStamp.setPrice(${desiredPrice}) reverted (tx ${hash}). The owner ${ownerAddress} may lack PRICE_ORACLE_ROLE on PostageStamp ${postageStampAddress}.`,
+    },
+  )
 
-  if (!resp.ok) {
-    throw new Error(`Failed to query block number: ${resp.status} ${resp.statusText}`)
+  const newPrice = await readLastPrice()
+  if (newPrice !== desiredPrice) {
+    throw new Error(
+      `PostageStamp.setPrice(${desiredPrice}) succeeded (tx ${txHash}) but PostageStamp.lastPrice is ${newPrice}.`,
+    )
   }
 
-  const data = (await resp.json()) as {
-    error?: { message?: string }
-    result?: string
-  }
-
-  if (data.error?.message) {
-    throw new Error(data.error.message)
-  }
-
-  return Number.parseInt(data.result ?? "0x0", 16)
-}
-
-function isEthereumCodeDeployed(code: string) {
-  return code !== "0x" && code.length > 2
+  console.log(
+    `  ${chalk.green("➜")}  ${chalk.bold(name)}:   postage price set to ${chalk.cyan(
+      String(desiredPrice),
+    )} PLUR ${chalk.gray(`(tx ${txHash})`)}`,
+  )
 }
 
 function createCorruptedBlockchainError(volumeName: string) {
@@ -556,10 +682,10 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
     })
   }
 
-  const env = {
+  const env = stripPluginInternalEnvKeys({
     ...(getEnv(name, context) ?? {}),
     ...envs,
-  }
+  })
   const beeEnv = {
     ...(getEnv("etherna-bee", context) ?? {}),
     ...envs,
@@ -586,10 +712,10 @@ export async function startBlockchain(context: ServiceEnvBuildContext, envs?: Be
     ],
     cmd: [
       "--allow-insecure-unlock",
-      "--unlock=0xCEeE442a149784faa65C35e328CCd64d874F9a02",
+      `--unlock=${BLOCKCHAIN_OWNER_ADDRESS}`,
       "--password=/root/extra/password",
       "--mine",
-      "--miner.etherbase=0xCEeE442a149784faa65C35e328CCd64d874F9a02",
+      `--miner.etherbase=${BLOCKCHAIN_OWNER_ADDRESS}`,
       "--http",
       '--http.api="debug,web3,eth,txpool,net,personal"',
       "--http.corsdomain=*",
@@ -678,6 +804,24 @@ export async function startBeeNodes(context: ServiceEnvBuildContext, envs?: BeeE
     // startBeeNode(name, mode, 3, bootnode, envs),
     // startBeeNode(name, mode, 4, bootnode, envs),
   ])
+
+  try {
+    const beeEnv = { ...(getEnv("etherna-bee", context) ?? {}), ...envs }
+    const blockchainEnv = {
+      ...(getEnv("etherna-blockchain", context) ?? {}),
+      ...envs,
+    }
+    await ensurePostagePrice({
+      rpcUrl: `http://127.0.0.1:${blockchainEnv.BLOCKCHAIN_PORT}`,
+      postageStampAddress: String(beeEnv.BEE_POSTAGE_STAMP_ADDRESS),
+      ownerPrivateKey: POSTAGE_STAMP_ADMIN_PRIVATE_KEY,
+      desiredPrice: BigInt(String(beeEnv.POSTAGE_PRICE ?? "24000")),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    logError(name, `Failed to sync postage price: ${message}`)
+  }
+
   return [queenProc, worker1Proc]
 }
 
@@ -698,10 +842,10 @@ export async function startBeeNode(
   })
 
   const { mode } = context
-  const env = {
+  const env = stripPluginInternalEnvKeys({
     ...(getEnv(name, context) ?? {}),
     ...envs,
-  }
+  })
 
   if (!worker) {
     delete env.BEE_BOOTNODE
@@ -1108,12 +1252,7 @@ export async function startShkeeperRedisContainer(networkName = SHKEEPER_NETWORK
   const proc = await startDockerContainer({
     containerName: name,
     imageName: "redis:7",
-    args: [
-      "--mount",
-      `type=volume,source=${volumeName},target=/data`,
-      "--network",
-      networkName,
-    ],
+    args: ["--mount", `type=volume,source=${volumeName},target=/data`, "--network", networkName],
   })
 
   const handleStdData = (data: unknown) => {

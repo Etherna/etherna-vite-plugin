@@ -1,6 +1,6 @@
 {
   "name": "@etherna/vite-plugin",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Vite plugin for Etherna services in Vite",
   "author": "Mattia Dalzocchio",
   "license": "LGPL-3.0-or-later",
@@ -36,6 +36,8 @@
     "vite": "^7.0.0 || ^8.0.0"
   },
   "dependencies": {
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
     "node-forge": "1.4.0"
   },
   "devDependencies": {

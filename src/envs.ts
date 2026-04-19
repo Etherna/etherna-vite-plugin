@@ -13,6 +13,46 @@ const BEE_PORT = 1633
 const BEE_P2P_PORT = 1634
 const BLOCKCHAIN_PORT = 9545
 const NETWORK_ID = 4020
+/**
+ * Pre-funded Clique signer / etherbase from fdp-play's genesis. Unlocked by geth
+ * at startup (see `startBlockchain` in `docker.ts`), so we can sign transactions
+ * via `eth_sendTransaction` without managing a private key.
+ */
+export const BLOCKCHAIN_OWNER_ADDRESS = "0xCEeE442a149784faa65C35e328CCd64d874F9a02"
+
+/**
+ * Default postage stamp price (PLUR per chunk per block). On fdp-play nobody runs
+ * the price-updater bot, so the on-chain `lastPrice` stays at 0 and stamps never
+ * expire. The plugin syncs this value into `PriceOracle` after Bee starts so
+ * stamps actually burn down. Override via `bee: { env: { POSTAGE_PRICE: "..." } }`.
+ */
+const DEFAULT_POSTAGE_PRICE = "24000"
+
+/**
+ * Private key of fdp-play's contract deployer, holder of `DEFAULT_ADMIN_ROLE`
+ * on the `PostageStamp` contract (set by the constructor's
+ * `_setupRole(DEFAULT_ADMIN_ROLE, msg.sender)`). The plugin uses it to grant
+ * itself `PRICE_ORACLE_ROLE` and call `PostageStamp.setPrice` directly,
+ * bypassing fdp-play's `PostagePriceOracle` (which is mis-wired to the BZZ
+ * token because `deploy.ts` passes one extra constructor arg the Solidity
+ * `PriceOracle(_postageStamp)` constructor silently ignores).
+ *
+ * It's NOT the unlocked Clique signer / etherbase: that account mines blocks
+ * but never deployed any contract, so it has no admin role anywhere.
+ *
+ * Same key as fdp-play's `orchestrator/hardhat.config.ts` (publicly committed,
+ * never used outside local dev). Used for client-side EIP-155 signing in
+ * `web3.ts` because geth 1.13+ removed `personal_importRawKey` /
+ * `personal_unlockAccount` from the HTTP API.
+ */
+export const POSTAGE_STAMP_ADMIN_PRIVATE_KEY =
+  "0x4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d"
+
+/**
+ * Bee env keys consumed only by the plugin (e.g. post-startup actions). They
+ * must be stripped before forwarding to bee/blockchain containers as `-e`.
+ */
+export const BEE_PLUGIN_INTERNAL_ENV_KEYS = ["POSTAGE_PRICE"] as const
 
 const SSO_HTTP_PORT = 32610
 const SSO_HTTPS_PORT = 42610
@@ -58,44 +98,6 @@ export interface ServiceEnvBuildContext {
   portlessAppPublicUrl?: string
 }
 
-export function defaultServiceEnvBuildContext(mode: "http" | "https"): ServiceEnvBuildContext {
-  return {
-    mode,
-    portless: false,
-    appPort: mode === "http" ? APP_PORT : APP_HTTPS_PORT,
-  }
-}
-
-/** Parses the listen port from `ASPNETCORE_URLS` (first URL if semicolon-separated). */
-export function parsePortFromAspNetCoreUrls(bindUrls: string): string {
-  const first = bindUrls.split(";")[0]?.trim() ?? ""
-  try {
-    const u = new URL(first)
-    if (u.port) {
-      return u.port
-    }
-    return u.protocol === "https:" ? "443" : "80"
-  } catch {
-    return first.split(":")[2] ?? "80"
-  }
-}
-
-function bindUrl(mode: "http" | "https", port: number): string {
-  return `${mode}://localhost:${port}`
-}
-
-function publicHttpUrl(
-  mode: "http" | "https",
-  port: number,
-  portless: boolean,
-  alias: PortlessServiceAlias,
-): string {
-  if (portless) {
-    return getPortlessPublicUrl(alias)
-  }
-  return bindUrl(mode, port)
-}
-
 export function buildServiceEnvs(context: ServiceEnvBuildContext) {
   const { mode, portless, appPort, portlessAppPublicUrl } = context
 
@@ -127,9 +129,9 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
     "Elastic:Urls:0": "http://localhost:9200",
     ...(mode === "https"
       ? {
-          ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
-          ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
-        }
+        ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
+        ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
+      }
       : {}),
   }
 
@@ -248,6 +250,7 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       NETWORK_ID,
     },
     "etherna-bee": {
+      POSTAGE_PRICE: DEFAULT_POSTAGE_PRICE,
       BEE_WARMUP_TIME: "10s",
       BEE_DEBUG_API_ENABLE: "true",
       BEE_VERBOSITY: "4",
@@ -278,6 +281,64 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
   return envs
 }
 
+
+export function defaultServiceEnvBuildContext(mode: "http" | "https"): ServiceEnvBuildContext {
+  return {
+    mode,
+    portless: false,
+    appPort: mode === "http" ? APP_PORT : APP_HTTPS_PORT,
+  }
+}
+
+/** Parses the listen port from `ASPNETCORE_URLS` (first URL if semicolon-separated). */
+export function parsePortFromAspNetCoreUrls(bindUrls: string): string {
+  const first = bindUrls.split(";")[0]?.trim() ?? ""
+  try {
+    const u = new URL(first)
+    if (u.port) {
+      return u.port
+    }
+    return u.protocol === "https:" ? "443" : "80"
+  } catch {
+    return first.split(":")[2] ?? "80"
+  }
+}
+
+function bindUrl(mode: "http" | "https", port: number): string {
+  return `${mode}://localhost:${port}`
+}
+
+function publicHttpUrl(
+  mode: "http" | "https",
+  port: number,
+  portless: boolean,
+  alias: PortlessServiceAlias,
+): string {
+  if (portless) {
+    return getPortlessPublicUrl(alias)
+  }
+  return bindUrl(mode, port)
+}
+
+export const getEnv = <T extends string>(name: T, context: ServiceEnvBuildContext) => {
+  const envs = buildServiceEnvs(context)
+  type Env = typeof envs
+  type AnyEnv = UnionToIntersection<Env[keyof Env]>
+  type AnyEnvKey = keyof AnyEnv
+
+  return ((envs as Record<string, unknown>)[name] ?? null) as T extends keyof Env
+    ? Env[T]
+    : Partial<Record<AnyEnvKey, string>> | null
+}
+
+/** Returns a copy of `env` with {@link BEE_PLUGIN_INTERNAL_ENV_KEYS} removed. */
+export function stripPluginInternalEnvKeys<T extends Record<string, unknown>>(env: T): T {
+  const internal = new Set<string>(BEE_PLUGIN_INTERNAL_ENV_KEYS)
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !internal.has(key))) as T
+}
+
+
+
 export type BuiltServiceEnvs = ReturnType<typeof buildServiceEnvs>
 
 export type ElasticEnv = StringEnvOverride<BuiltServiceEnvs["elastic"]>
@@ -295,14 +356,3 @@ export type ShkeeperEthereumEnv = StringEnvOverride<BuiltServiceEnvs["ethereum-s
 
 /** Union of env overrides accepted by ASP.NET Etherna containers (SSO, Index, Gateway, Credit, Beehive). */
 export type AspServiceEnv = SsoEnv | IndexEnv | GatewayEnv | CreditEnv | BeehiveEnv
-
-export const getEnv = <T extends string>(name: T, context: ServiceEnvBuildContext) => {
-  const envs = buildServiceEnvs(context)
-  type Env = typeof envs
-  type AnyEnv = UnionToIntersection<Env[keyof Env]>
-  type AnyEnvKey = keyof AnyEnv
-
-  return ((envs as Record<string, unknown>)[name] ?? null) as T extends keyof Env
-    ? Env[T]
-    : Partial<Record<AnyEnvKey, string>> | null
-}
