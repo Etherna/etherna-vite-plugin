@@ -61,9 +61,34 @@ export interface ShkeeperConfig extends ServiceConfig<ShkeeperEnv> {
   ethereum?: ShkeeperEthereumConfig
 }
 
+export const ETHERNA_DETACHED_ENV = "ETHERNA_DETACHED"
+
+/**
+ * Resolves detached mode: explicit `options.detached` wins, then `ETHERNA_DETACHED` env, then `false`.
+ * Env is truthy for `1`, `true`, `yes` (case-insensitive); falsy for `0`, `false`, `no` or unset.
+ */
+export function resolveDetachedMode(options: DockerPluginOptions): boolean {
+  if (typeof options.detached === "boolean") {
+    return options.detached
+  }
+  const raw = process.env[ETHERNA_DETACHED_ENV]?.trim().toLowerCase()
+  if (raw === "1" || raw === "true" || raw === "yes") {
+    return true
+  }
+  if (raw === "0" || raw === "false" || raw === "no") {
+    return false
+  }
+  return false
+}
+
 export interface DockerPluginOptions {
   https?: boolean
   enabled?: boolean
+  /**
+   * When true, reuse already-running service containers, start only missing ones, and do not stop
+   * containers when the Vite dev server exits. Defaults from `ETHERNA_DETACHED` when unset.
+   */
+  detached?: boolean
   /** When true, starts Portless on HTTP port 1355 and registers friendly `*.localhost` URLs for the app and enabled HTTP services. */
   portless?: boolean
   elastic?: boolean | ServiceConfig<ElasticEnv>
@@ -115,12 +140,18 @@ export interface EthernaPluginHarness {
   recordPortlessAlias: (name: PortlessServiceAlias, port: unknown) => Promise<void>
   cleanupPortless: () => Promise<void>
   killSpawns: () => void
-  shutdownServices: (exitProcess?: boolean, force?: boolean) => Promise<void>
+  getDetached: () => boolean
+  shutdownServices: (
+    exitProcess?: boolean,
+    force?: boolean,
+    opts?: { killTrackedSpawns?: boolean },
+  ) => Promise<void>
   installProcessSignalHandlers: () => void
 }
 
 /** Option helpers plus portless cleanup, child-process tracking, and shutdown (closure per plugin instance). */
 export function harnessEthernaPlugin(options: DockerPluginOptions) {
+  const detached = resolveDetachedMode(options)
   const spawns: ChildProcess[] = []
   let portlessProxyStartedByUs = false
   const portlessAliasesRegistered: PortlessServiceAlias[] = []
@@ -187,7 +218,11 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
     }
   }
 
-  const shutdownServices = async (exitProcess = false, force = false) => {
+  const shutdownServices = async (
+    exitProcess = false,
+    force = false,
+    opts?: { killTrackedSpawns?: boolean },
+  ) => {
     shutdownRequested = true
 
     if (shutdownInProgress && !force) {
@@ -205,7 +240,10 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
     }
 
     await cleanupPortless()
-    killSpawns()
+    const killTracked = opts?.killTrackedSpawns ?? !detached
+    if (killTracked) {
+      killSpawns()
+    }
     if (exitProcess) {
       process.exit(0)
     }
@@ -245,6 +283,7 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
     },
     cleanupPortless,
     killSpawns,
+    getDetached: () => detached,
     shutdownServices,
     installProcessSignalHandlers,
   } satisfies EthernaPluginHarness

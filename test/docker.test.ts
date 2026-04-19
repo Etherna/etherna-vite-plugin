@@ -1,13 +1,16 @@
 import { EventEmitter } from "node:events"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { SpawnOptions } from "node:child_process"
+
 class FakeChildProcess extends EventEmitter {
   stdout = new EventEmitter()
   stderr = new EventEmitter()
   kill = vi.fn()
+  unref = vi.fn()
 }
 
-const spawnMock = vi.fn<(command: string, args?: string[]) => FakeChildProcess>()
+const spawnMock = vi.fn<(command: string, args?: string[], opts?: SpawnOptions) => FakeChildProcess>()
 const existsSyncMock = vi.fn(() => true)
 const mkdirSyncMock = vi.fn()
 const readdirSyncMock = vi.fn<() => string[]>(() => [])
@@ -311,6 +314,116 @@ describe("ensureDockerImageFromGitHub", () => {
   })
 })
 
+describe("startDockerContainer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+  })
+
+  it("returns null and does not run when detached and inspect reports running", async () => {
+    spawnMock.mockImplementation((_command, args) => {
+      if (args?.[0] === "inspect") {
+        const proc = new FakeChildProcess()
+        queueMicrotask(() => {
+          proc.stdout?.emit("data", "true\n")
+          proc.emit("close", 0)
+        })
+        return proc
+      }
+      if (args?.[0] === "run") {
+        throw new Error("docker run should not be invoked when reusing a running container")
+      }
+      const proc = new FakeChildProcess()
+      queueMicrotask(() => proc.emit("close", 0))
+      return proc
+    })
+
+    const { startDockerContainer } = await import("../src/docker.ts")
+
+    const result = await startDockerContainer({
+      containerName: "reuse-test",
+      imageName: "some:img",
+      detached: true,
+    })
+
+    expect(result).toBeNull()
+  })
+
+  it("passes detached spawn options so docker is not in the terminal process group", async () => {
+    spawnMock.mockImplementation((_command, args) => {
+      if (args?.[0] === "inspect") {
+        const proc = new FakeChildProcess()
+        queueMicrotask(() => {
+          proc.stdout?.emit("data", "false\n")
+          proc.emit("close", 0)
+        })
+        return proc
+      }
+      if (args?.[0] === "ps") {
+        const proc = new FakeChildProcess()
+        queueMicrotask(() => {
+          proc.stdout?.emit("data", "\n")
+          proc.emit("close", 0)
+        })
+        return proc
+      }
+      if (args?.[0] === "run") {
+        return new FakeChildProcess()
+      }
+      const proc = new FakeChildProcess()
+      queueMicrotask(() => proc.emit("close", 0))
+      return proc
+    })
+
+    const { startDockerContainer } = await import("../src/docker.ts")
+
+    await startDockerContainer({
+      containerName: "spawn-detached-test",
+      imageName: "img:tag",
+      detached: true,
+    })
+
+    const dockerRun = spawnMock.mock.calls.find(
+      (call) => call[0] === "docker" && call[1]?.[0] === "run",
+    )
+    expect(dockerRun?.[2]).toEqual({
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+  })
+})
+
+describe("stopEnabledEthernaContainers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.resetModules()
+    spawnMock.mockImplementation(() => {
+      const proc = new FakeChildProcess()
+      queueMicrotask(() => proc.emit("close", 0))
+      return proc
+    })
+  })
+
+  it("issues docker stop for each enabled service container", async () => {
+    const { stopEnabledEthernaContainers } = await import("../src/docker.ts")
+
+    await stopEnabledEthernaContainers({
+      elastic: true,
+      mongo: true,
+      bee: false,
+      sso: false,
+      index: false,
+      gateway: false,
+      credit: false,
+      beehive: false,
+      shkeeper: false,
+    })
+
+    expect(spawnMock).toHaveBeenCalledWith("docker", ["stop", "elastic"])
+    expect(spawnMock).toHaveBeenCalledWith("docker", ["stop", "etherna-mongodb"])
+  })
+})
+
 describe("startShkeeperCoreContainer", () => {
   let runProc: FakeChildProcess
 
@@ -353,8 +466,10 @@ describe("startShkeeperCoreContainer", () => {
 
     await startPromise
 
-    expect(spawnMock).toHaveBeenCalledWith(
-      "docker",
+    const dockerRun = spawnMock.mock.calls.find(
+      (call) => call[0] === "docker" && call[1]?.[0] === "run",
+    )
+    expect(dockerRun?.[1]).toEqual(
       expect.arrayContaining([
         "run",
         "--rm",
@@ -371,6 +486,7 @@ describe("startShkeeperCoreContainer", () => {
         "etherna/shkeeper:local",
       ]),
     )
+    expect(dockerRun?.[2]).toBeUndefined()
   })
 
   it("starts shkeeper on the host network with localhost service discovery", async () => {
@@ -394,8 +510,10 @@ describe("startShkeeperCoreContainer", () => {
 
     await startPromise
 
-    expect(spawnMock).toHaveBeenCalledWith(
-      "docker",
+    const dockerRun = spawnMock.mock.calls.find(
+      (call) => call[0] === "docker" && call[1]?.[0] === "run",
+    )
+    expect(dockerRun?.[1]).toEqual(
       expect.arrayContaining([
         "run",
         "--rm",
@@ -411,10 +529,12 @@ describe("startShkeeperCoreContainer", () => {
         "gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:32650 'shkeeper:create_app()'",
       ]),
     )
-    expect(spawnMock).not.toHaveBeenCalledWith(
-      "docker",
-      expect.arrayContaining(["-p", "32650:5000"]),
-    )
+    expect(dockerRun?.[2]).toBeUndefined()
+    expect(
+      spawnMock.mock.calls.some(
+        (call) => call[0] === "docker" && call[1]?.includes("-p") && call[1]?.includes("32650:5000"),
+      ),
+    ).toBe(false)
   })
 })
 
@@ -481,6 +601,7 @@ describe("startShkeeperEthereumApiContainer", () => {
         "sleep 30 && gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:6000 run:server",
       ]),
     )
+    expect(dockerRun?.[2]).toBeUndefined()
   })
 })
 
@@ -526,8 +647,10 @@ describe("startShkeeperEthereumTasksContainer", () => {
     await startPromise
 
     expect(resolved).toBe(true)
-    expect(spawnMock).toHaveBeenCalledWith(
-      "docker",
+    const dockerRun = spawnMock.mock.calls.find(
+      (call) => call[0] === "docker" && call[1]?.[0] === "run",
+    )
+    expect(dockerRun?.[1]).toEqual(
       expect.arrayContaining([
         "run",
         "--rm",
@@ -541,5 +664,6 @@ describe("startShkeeperEthereumTasksContainer", () => {
         "sleep 30 && celery -A celery_worker.celery worker --loglevel=info -B",
       ]),
     )
+    expect(dockerRun?.[2]).toBeUndefined()
   })
 })

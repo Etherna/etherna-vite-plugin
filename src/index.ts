@@ -10,6 +10,7 @@ import {
   startElasticContainer,
   startMongoDbContainer,
   startShkeeperStack,
+  stopEnabledEthernaContainers,
 } from "./docker"
 import {
   buildServiceEnvs,
@@ -35,6 +36,7 @@ import { generateSslCertificate } from "./ssl"
 import { fetchFirstShkeeperWalletApiKey, logError } from "./utils"
 
 import type { ServiceEnvBuildContext } from "./envs"
+import type { ChildProcess } from "node:child_process"
 import type { Plugin, ServerOptions } from "vite"
 
 export type {
@@ -67,8 +69,10 @@ export type {
 export {
   applyEthernaPluginHttpsFallback,
   defineEthernaPlugin,
+  ETHERNA_DETACHED_ENV,
   getDevServerPort,
   harnessEthernaPlugin,
+  resolveDetachedMode,
 } from "./plugin-define"
 
 export type {
@@ -108,6 +112,7 @@ function createEthernaStartupHandlers(ctx: {
   getShkeeperConfig: EthernaPluginHarness["getShkeeperConfig"]
   getShkeeperBuild: EthernaPluginHarness["getShkeeperBuild"]
   isShkeeperEnabled: () => boolean
+  detached: boolean
 }): EthernaStartupHandlers {
   const {
     serviceCtx,
@@ -117,13 +122,18 @@ function createEthernaStartupHandlers(ctx: {
     getShkeeperConfig,
     getShkeeperBuild,
     isShkeeperEnabled,
+    detached,
   } = ctx
+
+  const pushSpawnMaybe = (...procs: (ChildProcess | null)[]) => {
+    pushSpawn(...procs.filter((p): p is ChildProcess => p != null))
+  }
 
   return {
     async startBeeBlockchain() {
       try {
-        const p = await startBlockchain(serviceCtx, getServiceEnv("bee"))
-        pushSpawn(p)
+        const p = await startBlockchain(serviceCtx, getServiceEnv("bee"), { detached })
+        pushSpawnMaybe(p)
         return !isShutdownRequested()
       } catch (error: unknown) {
         if (isShutdownRequested()) {
@@ -134,11 +144,11 @@ function createEthernaStartupHandlers(ctx: {
     },
     async startBeeNodes() {
       try {
-        const procs = await startBeeNodes(serviceCtx, getServiceEnv("bee"))
+        const procs = await startBeeNodes(serviceCtx, getServiceEnv("bee"), { detached })
         if (isShutdownRequested()) {
           return false
         }
-        pushSpawn(...procs)
+        pushSpawnMaybe(...procs)
         return !isShutdownRequested()
       } catch (error: unknown) {
         if (isShutdownRequested()) {
@@ -161,8 +171,9 @@ function createEthernaStartupHandlers(ctx: {
           ethereumEnv: sk.ethereum?.env,
           ethereumGithubRepo: ethRepo || undefined,
           ethereumGithubBranch: sk.ethereum?.githubBranch?.trim() || undefined,
+          detached,
         })
-        pushSpawn(...procs)
+        pushSpawnMaybe(...procs)
         return !isShutdownRequested()
       } catch (error: unknown) {
         if (isShutdownRequested()) {
@@ -172,13 +183,13 @@ function createEthernaStartupHandlers(ctx: {
       }
     },
     async startElastic() {
-      const p = await startElasticContainer(getServiceEnv("elastic"), serviceCtx)
-      pushSpawn(p)
+      const p = await startElasticContainer(getServiceEnv("elastic"), serviceCtx, { detached })
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startMongo() {
-      const p = await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx)
-      pushSpawn(p)
+      const p = await startMongoDbContainer(getServiceEnv("mongo"), serviceCtx, { detached })
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startBeehive() {
@@ -187,8 +198,9 @@ function createEthernaStartupHandlers(ctx: {
         "etherna/beehive-manager:latest",
         serviceCtx,
         getServiceEnv("beehive"),
+        { detached },
       )
-      pushSpawn(p)
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startIndex() {
@@ -197,8 +209,9 @@ function createEthernaStartupHandlers(ctx: {
         "etherna/etherna-index:latest",
         serviceCtx,
         getServiceEnv("index"),
+        { detached },
       )
-      pushSpawn(p)
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startSso() {
@@ -207,8 +220,9 @@ function createEthernaStartupHandlers(ctx: {
         "etherna/etherna-sso:latest",
         serviceCtx,
         getServiceEnv("sso"),
+        { detached },
       )
-      pushSpawn(p)
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startGateway() {
@@ -217,8 +231,9 @@ function createEthernaStartupHandlers(ctx: {
         "etherna/etherna-gateway:latest",
         serviceCtx,
         getServiceEnv("gateway"),
+        { detached },
       )
-      pushSpawn(p)
+      pushSpawnMaybe(p)
       return !isShutdownRequested()
     },
     async startCredit() {
@@ -235,8 +250,9 @@ function createEthernaStartupHandlers(ctx: {
           "etherna/etherna-credit:latest",
           serviceCtx,
           creditEnv,
+          { detached },
         )
-        pushSpawn(p)
+        pushSpawnMaybe(p)
         return !isShutdownRequested()
       } catch (error: unknown) {
         if (isShutdownRequested()) {
@@ -259,6 +275,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
     isShkeeperEnabled,
     getShkeeperConfig,
     getShkeeperBuild,
+    getDetached,
     isShutdownRequested,
     pushSpawn,
     setPortlessProxyStartedByUs,
@@ -360,6 +377,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
           getShkeeperConfig,
           getShkeeperBuild,
           isShkeeperEnabled,
+          detached: getDetached(),
         })
 
         const tree = createDependenciesTree(
@@ -501,7 +519,18 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
         )
         const result = await tree.start()
         if (result.shouldStop && !isShutdownRequested()) {
-          await shutdownServices(false)
+          await stopEnabledEthernaContainers({
+            elastic: isServiceEnabled("elastic"),
+            mongo: isServiceEnabled("mongo"),
+            bee: isServiceEnabled("bee"),
+            sso: isServiceEnabled("sso"),
+            index: isServiceEnabled("index"),
+            gateway: isServiceEnabled("gateway"),
+            credit: isServiceEnabled("credit"),
+            beehive: isServiceEnabled("beehive"),
+            shkeeper: isShkeeperEnabled(),
+          })
+          await shutdownServices(false, false, { killTrackedSpawns: true })
         }
       })
 

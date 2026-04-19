@@ -107,6 +107,32 @@ This will skip the container startup and use the existing containers.
 
 Useful when you want to run the containers separately.
 
+### Detached services (optional)
+
+When **detached** mode is on, the plugin **reuses already-running** Docker containers for enabled services, **starts only missing** ones, and **does not stop** those containers when you stop the Vite dev server (Portless aliases/proxy started for this session are still cleaned up). `docker run` is started in its own session so **Ctrl+C does not deliver SIGINT to the Docker CLI** (which would otherwise tear down `--rm` containers that share the terminal’s process group).
+
+Configure it in `vite.config.ts`:
+
+```ts
+etherna({
+  detached: true,
+})
+```
+
+Or set the environment variable (used when `detached` is not set on the plugin options):
+
+```bash
+ETHERNA_DETACHED=1 vite
+# or
+ETHERNA_DETACHED=true pnpm dev
+```
+
+An explicit `detached: true | false` in options always wins over `ETHERNA_DETACHED`.
+
+If startup fails for a service with `onFailure: "stop"` (the default for the dependency tree), the plugin **stops Docker containers for all enabled services**, including ones that were already running before this run, then cleans up tracked client processes.
+
+**Note:** Vite does not allow arbitrary CLI flags such as `vite --detached`; use the plugin option or `ETHERNA_DETACHED` instead.
+
 ### Portless (optional)
 
 When [portless](https://portless.sh/) is installed, you can opt in to friendly local URLs on the
