@@ -10,7 +10,7 @@ export default defineConfig({
     etherna({
       portless: true,
       mongo: true,
-      elastic: true,
+      elastic: false,
       bee: true,
       beehive: true,
       sso: true,

@@ -54,6 +54,20 @@ import type {
 const BEE_NETWORK_NAME = "etherna_bee_network"
 const SHKEEPER_NETWORK_NAME = "etherna_shkeeper_network"
 
+/** Docker Desktop groups resources by these labels (same as `docker compose`). Cosmetic only. */
+const COMPOSE_PROJECT_NAME = "etherna"
+
+function composeContainerLabels(serviceName: string): string[] {
+  return [
+    "--label",
+    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
+    "--label",
+    `com.docker.compose.service=${serviceName}`,
+    "--label",
+    "com.docker.compose.oneoff=False",
+  ]
+}
+
 const DOCKER_GET_STARTED_URL = "https://docs.docker.com/get-docker/"
 const DOCKER_DAEMON_WAIT_MS = 30_000
 const DOCKER_DAEMON_POLL_MS = 2_000
@@ -437,7 +451,16 @@ export async function startDockerContainer({
 
   // When the plugin runs in detached mode, put `docker run` in its own session so terminal Ctrl+C
   // (SIGINT to the foreground process group) does not stop the CLI and tear down `--rm` containers.
-  const runArgs = ["run", "--rm", "--name", containerName, ...args, imageName, ...cmd] as const
+  const runArgs = [
+    "run",
+    "--rm",
+    "--name",
+    containerName,
+    ...composeContainerLabels(containerName),
+    ...args,
+    imageName,
+    ...cmd,
+  ] as const
   const proc = (
     detached
       ? spawn("docker", [...runArgs], {
@@ -1169,7 +1192,15 @@ export async function stopEnabledEthernaContainers(enabled: EnabledEthernaServic
 }
 
 async function createContainerVolume(volumeName: string) {
-  const proc = spawn("docker", ["volume", "create", volumeName])
+  const proc = spawn("docker", [
+    "volume",
+    "create",
+    "--label",
+    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
+    "--label",
+    `com.docker.compose.volume=${volumeName}`,
+    volumeName,
+  ])
 
   await new Promise<void>((res) => {
     proc.on("close", () => {
@@ -1179,7 +1210,15 @@ async function createContainerVolume(volumeName: string) {
 }
 
 async function createNetwork(networkName: string) {
-  const proc = spawn("docker", ["network", "create", networkName])
+  const proc = spawn("docker", [
+    "network",
+    "create",
+    "--label",
+    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
+    "--label",
+    `com.docker.compose.network=${networkName}`,
+    networkName,
+  ])
 
   await new Promise<void>((res) => {
     proc.on("close", () => {
