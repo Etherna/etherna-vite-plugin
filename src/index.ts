@@ -198,8 +198,8 @@ function createEthernaStartupHandlers(ctx: {
     },
     async startBeehive() {
       const p = await startAspContainer(
-        "etherna-beehive-manager",
-        "etherna/beehive-manager:latest",
+        "etherna-beehive",
+        "etherna/beehive:latest",
         serviceCtx,
         getServiceEnv("beehive"),
         { detached },
@@ -483,7 +483,7 @@ export function etherna(options: DockerPluginOptions = {}): Plugin {
                     await recordPortlessAlias(
                       "beehive",
                       parsePortFromAspNetCoreUrls(
-                        String(envs["etherna-beehive-manager"].ASPNETCORE_URLS),
+                        String(envs["etherna-beehive"].ASPNETCORE_URLS),
                       ),
                     )
                   }

@@ -19,7 +19,7 @@ export const PORTLESS_CONTAINER_ALIASES: Record<string, PortlessServiceAlias> = 
   "etherna-index": "index",
   "etherna-credit": "credit",
   "etherna-gateway": "gateway",
-  "etherna-beehive-manager": "beehive",
+  "etherna-beehive": "beehive",
 }
 
 export function getPortlessPublicUrl(alias: PortlessServiceAlias): string {

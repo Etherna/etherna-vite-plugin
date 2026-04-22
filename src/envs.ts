@@ -235,7 +235,7 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       "ConnectionStrings:GatewayDb": `${mongodbUrl}/ethernaGatewayDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,
     },
-    "etherna-beehive-manager": {
+    "etherna-beehive": {
       ...baseAspEnv,
       ASPNETCORE_URLS: beehiveBindUrl,
       "SeedDb:BeeNodes:0:Hostname": "localhost",
@@ -350,7 +350,7 @@ export type SsoEnv = StringEnvOverride<BuiltServiceEnvs["etherna-sso"]>
 export type IndexEnv = StringEnvOverride<BuiltServiceEnvs["etherna-index"]>
 export type GatewayEnv = StringEnvOverride<BuiltServiceEnvs["etherna-gateway"]>
 export type CreditEnv = StringEnvOverride<BuiltServiceEnvs["etherna-credit"]>
-export type BeehiveEnv = StringEnvOverride<BuiltServiceEnvs["etherna-beehive-manager"]>
+export type BeehiveEnv = StringEnvOverride<BuiltServiceEnvs["etherna-beehive"]>
 export type ShkeeperEnv = StringEnvOverride<BuiltServiceEnvs["shkeeper-core"]>
 export type ShkeeperEthereumEnv = StringEnvOverride<BuiltServiceEnvs["ethereum-shkeeper"]>
 

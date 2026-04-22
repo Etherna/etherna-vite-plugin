@@ -24,7 +24,7 @@ describe("buildServiceEnvs", () => {
     expect(envs["etherna-sso"].ASPNETCORE_URLS).toBe("http://localhost:32610")
     expect(envs["etherna-sso"]["IdServer:SsoServer:BaseUrl"]).toBe("http://localhost:32610")
     expect(envs.app.port).toBe(5174)
-    expect(envs["etherna-beehive-manager"]["SeedDb:BeeNodes:0:ConnectionString"]).toBe(
+    expect(envs["etherna-beehive"]["SeedDb:BeeNodes:0:ConnectionString"]).toBe(
       "http://localhost:1633",
     )
   })
@@ -59,7 +59,7 @@ describe("buildServiceEnvs", () => {
     expect(envs["etherna-index"]["SsoServer:BaseUrl"]).toBe("http://localhost:32610")
     expect(envs["etherna-index"]["Swarm:GatewayUrl"]).toBe("http://localhost:32640")
     expect(envs["etherna-gateway"]["Bee:DirectUrl"]).toBe("http://localhost:12610")
-    expect(envs["etherna-beehive-manager"]["SeedDb:BeeNodes:0:ConnectionString"]).toBe(
+    expect(envs["etherna-beehive"]["SeedDb:BeeNodes:0:ConnectionString"]).toBe(
       "http://localhost:1633",
     )
   })

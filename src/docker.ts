@@ -1180,7 +1180,7 @@ export async function stopEnabledEthernaContainers(enabled: EnabledEthernaServic
     names.push("etherna-index")
   }
   if (enabled.beehive) {
-    names.push("etherna-beehive-manager")
+    names.push("etherna-beehive")
   }
   if (enabled.gateway) {
     names.push("etherna-gateway")
