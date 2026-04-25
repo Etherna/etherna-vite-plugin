@@ -10,7 +10,8 @@ class FakeChildProcess extends EventEmitter {
   unref = vi.fn()
 }
 
-const spawnMock = vi.fn<(command: string, args?: string[], opts?: SpawnOptions) => FakeChildProcess>()
+const spawnMock =
+  vi.fn<(command: string, args?: string[], opts?: SpawnOptions) => FakeChildProcess>()
 const existsSyncMock = vi.fn(() => true)
 const mkdirSyncMock = vi.fn()
 const readdirSyncMock = vi.fn<() => string[]>(() => [])
@@ -320,6 +321,39 @@ describe("startDockerContainer", () => {
     vi.resetModules()
   })
 
+  it("prefixes launched container names and does not add Docker Compose labels", async () => {
+    spawnMock.mockImplementation((_command, args) => {
+      if (args?.[0] === "ps") {
+        const proc = new FakeChildProcess()
+        queueMicrotask(() => {
+          proc.stdout?.emit("data", "\n")
+          proc.emit("close", 0)
+        })
+        return proc
+      }
+      if (args?.[0] === "run") {
+        return new FakeChildProcess()
+      }
+      const proc = new FakeChildProcess()
+      queueMicrotask(() => proc.emit("close", 0))
+      return proc
+    })
+
+    const { startDockerContainer } = await import("../src/docker.ts")
+
+    await startDockerContainer({
+      containerName: "elastic",
+      imageName: "img:tag",
+    })
+
+    const dockerRun = spawnMock.mock.calls.find(
+      (call) => call[0] === "docker" && call[1]?.[0] === "run",
+    )
+    expect(dockerRun?.[1]).toContain("etherna-elastic")
+    expect(dockerRun?.[1]).not.toContain("elastic")
+    expect(dockerRun?.[1]?.join(" ")).not.toContain("com.docker.compose.")
+  })
+
   it("returns null and does not run when detached and inspect reports running", async () => {
     spawnMock.mockImplementation((_command, args) => {
       if (args?.[0] === "inspect") {
@@ -419,7 +453,7 @@ describe("stopEnabledEthernaContainers", () => {
       shkeeper: false,
     })
 
-    expect(spawnMock).toHaveBeenCalledWith("docker", ["stop", "elastic"])
+    expect(spawnMock).toHaveBeenCalledWith("docker", ["stop", "etherna-elastic"])
     expect(spawnMock).toHaveBeenCalledWith("docker", ["stop", "etherna-mongodb"])
   })
 })
@@ -474,7 +508,7 @@ describe("startShkeeperCoreContainer", () => {
         "run",
         "--rm",
         "--name",
-        "shkeeper",
+        "etherna-shkeeper",
         "-p",
         "32650:5000",
         "--network",
@@ -518,7 +552,7 @@ describe("startShkeeperCoreContainer", () => {
         "run",
         "--rm",
         "--name",
-        "shkeeper",
+        "etherna-shkeeper",
         "--network",
         "host",
         "-e",
@@ -532,7 +566,8 @@ describe("startShkeeperCoreContainer", () => {
     expect(dockerRun?.[2]).toBeUndefined()
     expect(
       spawnMock.mock.calls.some(
-        (call) => call[0] === "docker" && call[1]?.includes("-p") && call[1]?.includes("32650:5000"),
+        (call) =>
+          call[0] === "docker" && call[1]?.includes("-p") && call[1]?.includes("32650:5000"),
       ),
     ).toBe(false)
   })
@@ -586,7 +621,7 @@ describe("startShkeeperEthereumApiContainer", () => {
         "run",
         "--rm",
         "--name",
-        "ethereum-shkeeper",
+        "etherna-ethereum-shkeeper",
         "--network",
         "etherna_shkeeper_network",
         "-e",
@@ -655,7 +690,7 @@ describe("startShkeeperEthereumTasksContainer", () => {
         "run",
         "--rm",
         "--name",
-        "ethereum-tasks",
+        "etherna-ethereum-tasks",
         "-e",
         "C_FORCE_ROOT=1",
         "vsyshost/ethereum-shkeeper:1.2.3",

@@ -2,8 +2,6 @@ import { spawn } from "node:child_process"
 import fs from "node:fs"
 import chalk from "chalk"
 
-import type { ChildProcess } from "node:child_process"
-
 import {
   ensureEthereumShkeeperDockerImage,
   ensureShkeeperDockerImage,
@@ -50,22 +48,14 @@ import type {
   ShkeeperEnv,
   ShkeeperEthereumEnv,
 } from "./envs"
+import type { ChildProcess } from "node:child_process"
 
 const BEE_NETWORK_NAME = "etherna_bee_network"
 const SHKEEPER_NETWORK_NAME = "etherna_shkeeper_network"
+const ETHERNA_CONTAINER_PREFIX = "etherna-"
 
-/** Docker Desktop groups resources by these labels (same as `docker compose`). Cosmetic only. */
-const COMPOSE_PROJECT_NAME = "etherna"
-
-function composeContainerLabels(serviceName: string): string[] {
-  return [
-    "--label",
-    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
-    "--label",
-    `com.docker.compose.service=${serviceName}`,
-    "--label",
-    "com.docker.compose.oneoff=False",
-  ]
+function resolveEthernaContainerName(name: string): string {
+  return name.startsWith(ETHERNA_CONTAINER_PREFIX) ? name : `${ETHERNA_CONTAINER_PREFIX}${name}`
 }
 
 const DOCKER_GET_STARTED_URL = "https://docs.docker.com/get-docker/"
@@ -436,16 +426,18 @@ export async function startDockerContainer({
   /** When true, skip start if the container is already running; remove a non-running name conflict before `docker run`. */
   detached?: boolean
 }): Promise<ChildProcess | null> {
+  const dockerContainerName = resolveEthernaContainerName(containerName)
+
   if (!detached) {
-    if (await isContainerNameInUse(containerName)) {
-      await stopContainer(containerName)
+    if (await isContainerNameInUse(dockerContainerName)) {
+      await stopContainer(dockerContainerName)
     }
   } else {
-    if (await isContainerRunning(containerName)) {
+    if (await isContainerRunning(dockerContainerName)) {
       return null
     }
-    if (await isContainerNameInUse(containerName)) {
-      await removeContainerForce(containerName)
+    if (await isContainerNameInUse(dockerContainerName)) {
+      await removeContainerForce(dockerContainerName)
     }
   }
 
@@ -455,8 +447,7 @@ export async function startDockerContainer({
     "run",
     "--rm",
     "--name",
-    containerName,
-    ...composeContainerLabels(containerName),
+    dockerContainerName,
     ...args,
     imageName,
     ...cmd,
@@ -473,10 +464,10 @@ export async function startDockerContainer({
     const text = String(data)
 
     if (/Pulling from/gm.test(text)) {
-      logLoading(containerName)
+      logLoading(dockerContainerName)
     }
     if (/Error response from daemon/gm.test(text)) {
-      logError(containerName, text)
+      logError(dockerContainerName, text)
     }
   })
   if (detached) {
@@ -652,9 +643,9 @@ export async function startAspContainer(
       ...Object.entries(env).flatMap(([key, value]) => [`-e`, `${key}=${String(value)}`]),
       ...(mode === "https"
         ? [
-          "--mount",
-          `type=bind,source=${resolvePathEscape(CERTIFICATE_DIR)},target=${CONTAINER_CERTS_DIR}/`,
-        ]
+            "--mount",
+            `type=bind,source=${resolvePathEscape(CERTIFICATE_DIR)},target=${CONTAINER_CERTS_DIR}/`,
+          ]
         : []),
       "--network",
       "host",
@@ -1087,7 +1078,12 @@ export async function startInterceptor(
 }
 
 async function isContainerNameInUse(name: string) {
-  const proc = spawn("docker", ["ps", "-a", "--filter", `name=${name}`])
+  const proc = spawn("docker", [
+    "ps",
+    "-a",
+    "--filter",
+    `name=${resolveEthernaContainerName(name)}`,
+  ])
   const result = await new Promise<string>((res) => {
     let data = ""
     proc.stdout?.on("data", (d) => {
@@ -1103,7 +1099,7 @@ async function isContainerNameInUse(name: string) {
 }
 
 async function stopContainer(name: string) {
-  const proc = spawn("docker", ["stop", name])
+  const proc = spawn("docker", ["stop", resolveEthernaContainerName(name)])
   await new Promise<void>((res) => {
     proc.on("close", () => {
       res()
@@ -1114,9 +1110,13 @@ async function stopContainer(name: string) {
 /** True when a container with this exact name exists and is running. */
 export async function isContainerRunning(name: string): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn("docker", ["inspect", "-f", "{{.State.Running}}", name], {
-      stdio: ["ignore", "pipe", "ignore"],
-    })
+    const proc = spawn(
+      "docker",
+      ["inspect", "-f", "{{.State.Running}}", resolveEthernaContainerName(name)],
+      {
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    )
     let out = ""
     proc.stdout?.on("data", (d) => {
       out += String(d)
@@ -1134,7 +1134,9 @@ export async function isContainerRunning(name: string): Promise<boolean> {
 
 async function removeContainerForce(name: string) {
   await new Promise<void>((res) => {
-    const proc = spawn("docker", ["rm", "-f", name], { stdio: "ignore" })
+    const proc = spawn("docker", ["rm", "-f", resolveEthernaContainerName(name)], {
+      stdio: "ignore",
+    })
     proc.on("error", () => res())
     proc.on("close", () => res())
   })
@@ -1192,15 +1194,7 @@ export async function stopEnabledEthernaContainers(enabled: EnabledEthernaServic
 }
 
 async function createContainerVolume(volumeName: string) {
-  const proc = spawn("docker", [
-    "volume",
-    "create",
-    "--label",
-    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
-    "--label",
-    `com.docker.compose.volume=${volumeName}`,
-    volumeName,
-  ])
+  const proc = spawn("docker", ["volume", "create", volumeName])
 
   await new Promise<void>((res) => {
     proc.on("close", () => {
@@ -1210,15 +1204,7 @@ async function createContainerVolume(volumeName: string) {
 }
 
 async function createNetwork(networkName: string) {
-  const proc = spawn("docker", [
-    "network",
-    "create",
-    "--label",
-    `com.docker.compose.project=${COMPOSE_PROJECT_NAME}`,
-    "--label",
-    `com.docker.compose.network=${networkName}`,
-    networkName,
-  ])
+  const proc = spawn("docker", ["network", "create", networkName])
 
   await new Promise<void>((res) => {
     proc.on("close", () => {
@@ -1276,12 +1262,12 @@ export async function startShkeeperCoreContainer({
     ],
     ...(useHostNetwork
       ? {
-        cmd: [
-          "bash",
-          "-c",
-          `gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:${port} 'shkeeper:create_app()'`,
-        ],
-      }
+          cmd: [
+            "bash",
+            "-c",
+            `gunicorn --access-logfile=- --workers=1 --threads=16 --timeout=600 --bind=0.0.0.0:${port} 'shkeeper:create_app()'`,
+          ],
+        }
       : {}),
     detached,
   })
