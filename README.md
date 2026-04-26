@@ -109,7 +109,7 @@ Useful when you want to run the containers separately.
 
 ### Detached services (optional)
 
-When **detached** mode is on, the plugin **reuses already-running** Docker containers for enabled services, **starts only missing** ones, and **does not stop** those containers when you stop the Vite dev server (Portless aliases/proxy started for this session are still cleaned up). `docker run` is started in its own session so **Ctrl+C does not deliver SIGINT to the Docker CLI** (which would otherwise tear down `--rm` containers that share the terminal’s process group).
+When **detached** mode is on, the plugin **reuses already-running** Docker containers for enabled services, **starts only missing** ones, and **does not stop** those containers when you stop the Vite dev server. **Portless** aliases and the proxy process are **left running** as well (including when this session started the proxy), so local `*.localhost` routes stay registered. `docker run` is started in its own session so **Ctrl+C does not deliver SIGINT to the Docker CLI** (which would otherwise tear down `--rm` containers that share the terminal’s process group).
 
 Configure it in `vite.config.ts`:
 

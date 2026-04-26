@@ -198,6 +198,9 @@ export function harnessEthernaPlugin(options: DockerPluginOptions) {
   }
 
   const cleanupPortless = async () => {
+    if (getDetached()) {
+      return
+    }
     if (portlessAliasesRegistered.length > 0) {
       await removePortlessAliases(portlessAliasesRegistered)
       portlessAliasesRegistered.length = 0
