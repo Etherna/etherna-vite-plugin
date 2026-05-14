@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { ETHERNA_DETACHED_ENV, harnessEthernaPlugin, resolveDetachedMode } from "../src/plugin-define.ts"
+import {
+  ETHERNA_DETACHED_ENV,
+  harnessEthernaPlugin,
+  resolveDetachedMode,
+} from "../src/plugin-define.ts"
+
+import type * as PortlessModule from "../src/portless.ts"
 
 const portlessMocks = vi.hoisted(() => ({
   addPortlessAlias: vi.fn(() => Promise.resolve()),
-  removePortlessAliases: vi.fn(() => Promise.resolve()),
+  removePortlessAliases: vi.fn((_names: string[]) => Promise.resolve()),
   stopPortlessProxy: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock("../src/portless.ts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/portless.ts")>()
+  const actual = await importOriginal<typeof PortlessModule>()
   return {
     ...actual,
     addPortlessAlias: portlessMocks.addPortlessAlias,
@@ -77,8 +83,9 @@ describe("harnessEthernaPlugin portless cleanup", () => {
   it("removes aliases and stops proxy on shutdown when not detached", async () => {
     const h = harnessEthernaPlugin({ detached: false, portless: true })
     h.setPortlessProxyStartedByUs(true)
-    portlessMocks.removePortlessAliases.mockImplementationOnce(async (names: string[]) => {
+    portlessMocks.removePortlessAliases.mockImplementationOnce((names: string[]) => {
       expect(names).toEqual(["bee"])
+      return Promise.resolve()
     })
     await h.recordPortlessAlias("bee", 1633)
     await h.shutdownServices(false, false)

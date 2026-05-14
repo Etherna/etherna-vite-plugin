@@ -1,5 +1,6 @@
 .github
 .vscode
+.cursor
 node_modules
 src
 example
@@ -11,6 +12,8 @@ index.html
 .prettier*
 eslint.config.js
 prettier.config.js
+.oxfmt*
+.oxlint*
 
 pnpm-lock.yaml
 tsconfig.json

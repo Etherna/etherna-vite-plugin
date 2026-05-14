@@ -64,7 +64,8 @@ export default defineConfig({
 `shkeeper` is opt-in and currently targets a Docker-only `ETH` setup.
 
 - use `githubRepo` prop to build shkeeper or ethereum-shkeeper from a custom repository
-- using `githubRepo: "mattiaz9/ethereum-shkeeper"` fork allows to use the integrated Ethereum RPC out of the box
+- using `githubRepo: "mattiaz9/ethereum-shkeeper"` fork allows to use the integrated Ethereum RPC
+  out of the box
 
 ```ts
 // vite.config.ts
@@ -92,7 +93,6 @@ etherna({
 })
 ```
 
-
 ### Disable all containers
 
 ```ts
@@ -107,9 +107,36 @@ This will skip the container startup and use the existing containers.
 
 Useful when you want to run the containers separately.
 
+### CLI startup
+
+You can start services without running Vite:
+
+```bash
+pnpm exec etherna start sso gateway
+```
+
+The CLI starts the requested services plus their dependencies. For example, `gateway` also starts
+MongoDB, SSO, Beehive, Bee, and the local blockchain. CLI startup is detached by default, so it
+reuses already-running Etherna containers and leaves them running after the command exits.
+
+Pass options directly on the command line:
+
+```bash
+pnpm exec etherna start sso gateway --portless --app-port 5173
+```
+
+Use `--portless` to start the Portless proxy and register aliases, `--app-port <port>` to set the
+app URL used by SSO client configuration, and `--attached` if you want the CLI to track Docker
+processes for the current session.
+
 ### Detached services (optional)
 
-When **detached** mode is on, the plugin **reuses already-running** Docker containers for enabled services, **starts only missing** ones, and **does not stop** those containers when you stop the Vite dev server. **Portless** aliases and the proxy process are **left running** as well (including when this session started the proxy), so local `*.localhost` routes stay registered. `docker run` is started in its own session so **Ctrl+C does not deliver SIGINT to the Docker CLI** (which would otherwise tear down `--rm` containers that share the terminal’s process group).
+When **detached** mode is on, the plugin **reuses already-running** Docker containers for enabled
+services, **starts only missing** ones, and **does not stop** those containers when you stop the
+Vite dev server. **Portless** aliases and the proxy process are **left running** as well (including
+when this session started the proxy), so local `*.localhost` routes stay registered. `docker run` is
+started in its own session so **Ctrl+C does not deliver SIGINT to the Docker CLI** (which would
+otherwise tear down `--rm` containers that share the terminal’s process group).
 
 Configure it in `vite.config.ts`:
 
@@ -129,9 +156,12 @@ ETHERNA_DETACHED=true pnpm dev
 
 An explicit `detached: true | false` in options always wins over `ETHERNA_DETACHED`.
 
-If startup fails for a service with `onFailure: "stop"` (the default for the dependency tree), the plugin **stops Docker containers for all enabled services**, including ones that were already running before this run, then cleans up tracked client processes.
+If startup fails for a service with `onFailure: "stop"` (the default for the dependency tree), the
+plugin **stops Docker containers for all enabled services**, including ones that were already
+running before this run, then cleans up tracked client processes.
 
-**Note:** Vite does not allow arbitrary CLI flags such as `vite --detached`; use the plugin option or `ETHERNA_DETACHED` instead.
+**Note:** Vite does not allow arbitrary CLI flags such as `vite --detached`; use the plugin option
+or `ETHERNA_DETACHED` instead.
 
 ### Portless (optional)
 

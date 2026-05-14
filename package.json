@@ -1,6 +1,6 @@
 {
   "name": "@etherna/vite-plugin",
-  "version": "1.5.7",
+  "version": "1.6.0",
   "description": "Vite plugin for Etherna services in Vite",
   "author": "Mattia Dalzocchio",
   "license": "LGPL-3.0-or-later",
@@ -23,6 +23,9 @@
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "etherna": "dist/bin.cjs"
+  },
   "scripts": {
     "dev": "pnpm vite",
     "build": "pnpm tsup",

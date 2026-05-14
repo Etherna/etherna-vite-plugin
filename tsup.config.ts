@@ -1,12 +1,25 @@
 import { defineConfig } from "tsup"
 
-export default defineConfig({
-  entry: ["src/index.ts"],
+const shared = {
   splitting: false,
   sourcemap: true,
-  clean: true,
   minify: true,
-  format: ["esm", "cjs"],
   dts: true,
   external: ["vite"],
-})
+}
+
+export default defineConfig([
+  {
+    ...shared,
+    entry: ["src/index.ts"],
+    clean: true,
+    format: ["esm", "cjs"],
+  },
+  {
+    ...shared,
+    entry: ["src/bin.ts"],
+    clean: false,
+    format: ["cjs"],
+    dts: false,
+  },
+])
