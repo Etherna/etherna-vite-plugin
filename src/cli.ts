@@ -84,8 +84,8 @@ const SERVICE_DEPENDENCIES = {
   sso: ["mongo"],
   gateway: ["mongo", "sso", "beehive"],
   index: ["mongo", "sso", "gateway"],
-  shkeeper: ["bee-blockchain"],
-  credit: ["mongo", "sso", "shkeeper"],
+  shkeeper: ["bee-blockchain", "credit"],
+  credit: ["mongo", "sso"],
 } satisfies Record<CliStartupCode, CliStartupCode[]>
 
 function isCliServiceName(value: string): value is CliServiceName {
@@ -318,7 +318,7 @@ function createCliServiceDefinitions({
     {
       code: "shkeeper",
       enabled: enabled.shkeeper,
-      dependencies: ["bee-blockchain"],
+      dependencies: ["bee-blockchain", "credit"],
       onFailure: "stop",
       startupCallback: async () => {
         const procs = await startShkeeperStack({
@@ -415,10 +415,10 @@ function createCliServiceDefinitions({
     {
       code: "credit",
       enabled: enabled.credit,
-      dependencies: ["mongo", "sso", "shkeeper"],
+      dependencies: ["mongo", "sso"],
       onFailure: "stop",
       startupCallback: async () => {
-        const apiKey = await fetchFirstShkeeperWalletApiKey()
+        const apiKey = enabled.shkeeper ? await fetchFirstShkeeperWalletApiKey() : null
         const env = apiKey ? { "Payments:ShKeeper:ApiKey": apiKey } : {}
         const p = await startAspContainer(
           "etherna-credit",

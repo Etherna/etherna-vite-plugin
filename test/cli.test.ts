@@ -40,7 +40,21 @@ describe("resolveCliServiceSelection", () => {
       gateway: true,
       credit: true,
       beehive: true,
-      shkeeper: true,
+      shkeeper: false,
+    })
+  })
+
+  it("does not start shkeeper as a credit dependency", () => {
+    expect(resolveCliServiceSelection(["credit"])).toEqual({
+      elastic: false,
+      mongo: true,
+      bee: false,
+      sso: true,
+      index: false,
+      gateway: false,
+      credit: true,
+      beehive: false,
+      shkeeper: false,
     })
   })
 })
