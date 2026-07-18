@@ -210,6 +210,11 @@ export interface ShkeeperConfig extends ServiceConfig<ShkeeperEnv> {
   ethereum?: ShkeeperEthereumConfig
 }
 
+/** Handle returned by `start`, used to tear the run down (mirrors `EthernaSession.shutdown`). */
+export interface EthernaSessionHandle {
+  shutdown: (opts?: { killTrackedSpawns?: boolean }) => Promise<void>
+}
+
 export interface StartOptions {
   /**
    * When true, reuse already-running service containers, start only missing ones, and do not stop

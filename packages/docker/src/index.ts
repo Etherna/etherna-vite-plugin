@@ -1,5 +1,24 @@
-export async function start(_options: Record<string, unknown> = {}) {
-  return { shutdown: async () => {} }
-}
+export { start, stop } from "./manager"
 
-export async function stop(_services: string | string[]) {}
+export { ETHERNA_DETACHED_ENV, resolveDetachedMode } from "./resolve-options"
+
+export type {
+  AspServiceEnv,
+  BeeEnv,
+  BeehiveEnv,
+  CreditEnv,
+  ElasticEnv,
+  EthernaServiceName,
+  EthernaSessionHandle,
+  GatewayEnv,
+  IndexEnv,
+  MongoEnv,
+  ServiceConfig,
+  ShkeeperBuildConfig,
+  ShkeeperConfig,
+  ShkeeperEnv,
+  ShkeeperEthereumConfig,
+  ShkeeperEthereumEnv,
+  SsoEnv,
+  StartOptions,
+} from "./types"
