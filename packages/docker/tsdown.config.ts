@@ -1,10 +1,12 @@
-import { defineConfig } from "tsup"
+import { defineConfig } from "tsdown"
 
 const shared = {
-  splitting: false,
   sourcemap: true,
   minify: true,
   dts: true,
+  deps: {
+    onlyBundle: false as const,
+  },
 }
 
 export default defineConfig([
