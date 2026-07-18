@@ -41,7 +41,7 @@ describe("resolveStartPlan", () => {
     Reflect.deleteProperty(process.env, ETHERNA_DETACHED_ENV)
   })
 
-  it("enables every service by default when options omit them", () => {
+  it("enables every service by default except shkeeper (opt-in)", () => {
     const plan = resolveStartPlan({})
     expect(plan.enabled).toEqual({
       blockchain: true,
@@ -52,7 +52,7 @@ describe("resolveStartPlan", () => {
       gateway: true,
       index: true,
       mongo: true,
-      shkeeper: true,
+      shkeeper: false,
       sso: true,
     })
   })
@@ -75,12 +75,14 @@ describe("resolveStartPlan", () => {
     expect(plan.enabled.mongo).toBe(false)
   })
 
-  it("supports shkeeper as boolean or config object", () => {
+  it("enables shkeeper only when explicitly opted in via true or a config object", () => {
+    expect(resolveStartPlan({}).enabled.shkeeper).toBe(false)
+    expect(resolveStartPlan({ shkeeper: false }).enabled.shkeeper).toBe(false)
     expect(resolveStartPlan({ shkeeper: true }).enabled.shkeeper).toBe(true)
-    expect(resolveStartPlan({ shkeeper: { enabled: false } }).enabled.shkeeper).toBe(false)
     expect(resolveStartPlan({ shkeeper: { build: { githubRepo: "etherna/shkeeper" } } }).enabled.shkeeper).toBe(
       true,
     )
+    expect(resolveStartPlan({ shkeeper: { enabled: false } }).enabled.shkeeper).toBe(false)
   })
 
   it("mirrors the bee flag onto blockchain (no independent StartOptions toggle)", () => {

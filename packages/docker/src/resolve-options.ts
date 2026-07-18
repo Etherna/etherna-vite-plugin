@@ -41,6 +41,17 @@ function isServiceOptionEnabled(value: boolean | ServiceConfig<unknown> | undefi
   return value !== false
 }
 
+/**
+ * Mirrors `harnessEthernaPlugin`'s `isShkeeperEnabled` from `src/plugin-define.ts`: shkeeper is
+ * opt-in — enabled only when set to `true` or a config object (unless `{ enabled: false }`).
+ */
+function isShkeeperOptionEnabled(value: boolean | ServiceConfig<unknown> | undefined): boolean {
+  if (value === true) {
+    return true
+  }
+  return typeof value === "object" && value !== null ? value.enabled !== false : false
+}
+
 export interface StartPlan {
   /**
    * Per-service enabled flags, one per {@link EthernaServiceName}. Reflects only the caller's
@@ -60,7 +71,10 @@ export interface StartPlan {
 export function resolveStartPlan(options: StartOptions): StartPlan {
   const enabled = {} as Record<EthernaServiceName, boolean>
   for (const service of CONFIGURABLE_SERVICE_NAMES) {
-    enabled[service] = isServiceOptionEnabled(options[service])
+    enabled[service] =
+      service === "shkeeper"
+        ? isShkeeperOptionEnabled(options[service])
+        : isServiceOptionEnabled(options[service])
   }
   // `blockchain` has no independent StartOptions toggle; it always mirrors `bee`.
   enabled.blockchain = enabled.bee
