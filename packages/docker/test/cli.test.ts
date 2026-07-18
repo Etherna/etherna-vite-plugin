@@ -86,7 +86,7 @@ describe("resolveCliServiceSelection", () => {
     })
   })
 
-  it("treats all as every service enabled", () => {
+  it("treats all as every default service except shkeeper", () => {
     expect(resolveCliServiceSelection(["all"])).toEqual({
       blockchain: true,
       elastic: true,
@@ -97,12 +97,16 @@ describe("resolveCliServiceSelection", () => {
       gateway: true,
       credit: true,
       beehive: true,
-      shkeeper: true,
+      shkeeper: false,
     })
   })
 
-  it("defaults an empty selection to all", () => {
+  it("defaults an empty selection to all except shkeeper", () => {
     expect(resolveCliServiceSelection([])).toEqual(resolveCliServiceSelection(["all"]))
+  })
+
+  it("enables shkeeper when explicitly requested with all", () => {
+    expect(resolveCliServiceSelection(["all", "shkeeper"]).shkeeper).toBe(true)
   })
 })
 
@@ -135,7 +139,7 @@ describe("runCli", () => {
     expect(stop).not.toHaveBeenCalled()
   })
 
-  it("start defaults detached to true, enables every service, and exits after start", async () => {
+  it("start defaults detached to true, enables default services, and exits after start", async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(() => undefined as never)
 
     await runCli(["start"])
@@ -153,7 +157,6 @@ describe("runCli", () => {
       gateway: true,
       credit: true,
       beehive: true,
-      shkeeper: true,
     })
     expect(exitSpy).toHaveBeenCalledWith(0)
   })
@@ -176,7 +179,6 @@ describe("runCli", () => {
       gateway: true,
       credit: false,
       beehive: false,
-      shkeeper: false,
     })
     expect(exitSpy).not.toHaveBeenCalled()
   })

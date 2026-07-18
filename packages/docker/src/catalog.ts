@@ -89,7 +89,8 @@ export const SERVICE_CATALOG: Record<StartupCode, StartupNodeDefinition> = {
   },
 }
 
-const ALL_SERVICE_NAMES: readonly EthernaServiceName[] = [
+/** Every logical service name (including opt-in services). */
+export const ALL_SERVICE_NAMES: readonly EthernaServiceName[] = [
   "blockchain",
   "bee",
   "beehive",
@@ -101,6 +102,10 @@ const ALL_SERVICE_NAMES: readonly EthernaServiceName[] = [
   "shkeeper",
   "sso",
 ]
+
+/** Default `etherna start` / `etherna start all` expansion — shkeeper stays opt-in. */
+export const DEFAULT_START_SERVICE_NAMES: readonly EthernaServiceName[] =
+  ALL_SERVICE_NAMES.filter((name) => name !== "shkeeper")
 
 /** Startup codes directly implied by a logical service name, before dependency expansion. */
 function codesForServiceName(name: EthernaServiceName): StartupCode[] {

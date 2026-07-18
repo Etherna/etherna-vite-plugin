@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { resolveEnabledFromServices, SERVICE_CATALOG } from "../src/catalog.ts"
+import { ALL_SERVICE_NAMES, DEFAULT_START_SERVICE_NAMES, resolveEnabledFromServices, SERVICE_CATALOG } from "../src/catalog.ts"
 import { containerNamesFor } from "../src/runtime/names.ts"
 
 describe("containerNamesFor", () => {
@@ -32,6 +32,10 @@ describe("containerNamesFor", () => {
 })
 
 describe("SERVICE_CATALOG", () => {
+  it("defines default start services without opt-in shkeeper", () => {
+    expect(DEFAULT_START_SERVICE_NAMES).toEqual(ALL_SERVICE_NAMES.filter((name) => name !== "shkeeper"))
+  })
+
   it("matches the canonical Vite-plugin dependency graph (not the legacy CLI graph)", () => {
     expect(SERVICE_CATALOG["bee-blockchain"].dependencies).toEqual([])
     expect(SERVICE_CATALOG["bee-nodes"].dependencies).toEqual(["bee-blockchain"])

@@ -1,6 +1,6 @@
 import chalk from "chalk"
 
-import { resolveEnabledFromServices } from "./catalog"
+import { ALL_SERVICE_NAMES, DEFAULT_START_SERVICE_NAMES, resolveEnabledFromServices } from "./catalog"
 import { start, stop } from "./manager"
 
 import type { EthernaServiceName, StartOptions } from "./types"
@@ -20,30 +20,43 @@ export interface ParsedCliArgs {
   options: CliStartOptions
 }
 
-/** Every logical service name, mirroring `EthernaServiceName` (kept as a runtime array for CLI parsing/expansion). */
-const ALL_SERVICE_NAMES: readonly EthernaServiceName[] = [
-  "blockchain",
-  "bee",
-  "beehive",
-  "credit",
-  "elastic",
-  "gateway",
-  "index",
-  "mongo",
-  "shkeeper",
-  "sso",
-]
-
 function isCliServiceName(value: string): value is CliServiceName {
-  return value === "all" || (ALL_SERVICE_NAMES as readonly string[]).includes(value)
+  return value === "all" || (DEFAULT_START_SERVICE_NAMES as readonly string[]).includes(value) || value === "shkeeper"
 }
 
-/** Expands the `"all"` keyword (or an empty selection) into every logical service name. */
-function expandServiceNames(services: CliServiceName[]): EthernaServiceName[] {
-  if (services.length === 0 || services.includes("all")) {
-    return [...ALL_SERVICE_NAMES]
+/** Expands start selections; `"all"` / empty use {@link DEFAULT_START_SERVICE_NAMES} (shkeeper excluded). */
+function expandStartServiceNames(services: CliServiceName[]): EthernaServiceName[] {
+  if (services.length === 0) {
+    return [...DEFAULT_START_SERVICE_NAMES]
+  }
+  if (services.includes("all")) {
+    const names = new Set<EthernaServiceName>(DEFAULT_START_SERVICE_NAMES)
+    for (const service of services) {
+      if (service !== "all") {
+        names.add(service)
+      }
+    }
+    return [...names]
   }
   return services as EthernaServiceName[]
+}
+
+/** Expands stop selections; `"all"` stops every logical service group, including shkeeper. */
+function expandStopServiceNames(services: CliServiceName[]): EthernaServiceName[] {
+  if (services.includes("all")) {
+    const names = new Set<EthernaServiceName>(ALL_SERVICE_NAMES)
+    for (const service of services) {
+      if (service !== "all") {
+        names.add(service)
+      }
+    }
+    return [...names]
+  }
+  return services as EthernaServiceName[]
+}
+
+function isDefaultAllSelection(services: CliServiceName[]): boolean {
+  return services.length === 0 || services.includes("all")
 }
 
 function parsePort(raw: string | undefined, flag: string): number {
@@ -113,12 +126,17 @@ export function parseCliArgs(argv: string[]): ParsedCliArgs {
 /**
  * Resolves a CLI service selection into the canonical enabled-service map, following the Vite
  * plugin's dependency graph ({@link resolveEnabledFromServices}) — not the legacy CLI graph. An
- * empty selection (or the `"all"` keyword) enables every logical service.
+ * empty selection (or the `"all"` keyword) enables every default service; shkeeper stays opt-in
+ * unless explicitly requested (credit still pulls it in when credit is named directly).
  */
 export function resolveCliServiceSelection(
   services: CliServiceName[],
 ): Record<EthernaServiceName, boolean> {
-  return resolveEnabledFromServices(expandServiceNames(services))
+  const enabled = resolveEnabledFromServices(expandStartServiceNames(services))
+  if (isDefaultAllSelection(services) && !services.includes("shkeeper")) {
+    enabled.shkeeper = false
+  }
+  return enabled
 }
 
 function toStartOptions(
@@ -138,7 +156,7 @@ function toStartOptions(
     gateway: enabled.gateway,
     credit: enabled.credit,
     beehive: enabled.beehive,
-    shkeeper: enabled.shkeeper,
+    ...(enabled.shkeeper ? { shkeeper: true } : {}),
   }
 }
 
@@ -174,7 +192,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     }
 
     if (parsed.command === "stop") {
-      await stop(expandServiceNames(parsed.services))
+      await stop(expandStopServiceNames(parsed.services))
       return
     }
 
