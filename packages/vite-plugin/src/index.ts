@@ -3,7 +3,7 @@ import chalk from "chalk"
 import { loadEnv } from "vite"
 
 import { DEFAULT_APP_HTTPS_PORT, DEFAULT_APP_PORT } from "./consts"
-import { getDevServerPort } from "./options"
+import { applyEthernaPluginHttpsFallback, getDevServerPort } from "./options"
 import { generateSslCertificate } from "./ssl"
 
 import type { EthernaPluginOptions } from "./options"
@@ -22,6 +22,8 @@ const ETHERNA_ENV_PREFIXES: string[] = ["ETHERNA_", "PORTLESS_"]
  * concerns: env-prefix loading, SSL cert injection, and the `enabled` / `https` options.
  */
 export function etherna(options: EthernaPluginOptions = {}): Plugin {
+  applyEthernaPluginHttpsFallback(options)
+
   let shutdown: EthernaSessionHandle["shutdown"] | undefined
 
   return {

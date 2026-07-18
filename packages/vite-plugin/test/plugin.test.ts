@@ -76,10 +76,15 @@ describe("etherna plugin", () => {
     })
   })
 
-  it("passes https mode and strips vite-only options from start", async () => {
+  it("falls back to http mode when https is requested and strips vite-only options from start", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
     const { etherna } = await import("../src/index.ts")
-    const plugin = etherna({ bee: true, https: true, enabled: true })
+    const options = { bee: true, https: true, enabled: true }
+    const plugin = etherna(options)
     const httpServer = new FakeHttpServer()
+
+    expect(options.https).toBe(false)
+    expect(log).toHaveBeenCalledOnce()
 
     await runConfigureServer(plugin, httpServer)
     httpServer.emit("listening")
@@ -89,9 +94,10 @@ describe("etherna plugin", () => {
     })
     const firstCall = startMock.mock.calls[0] as unknown as unknown[]
     const startArgs = (firstCall?.[0] ?? {}) as Record<string, unknown>
-    expect(startArgs.mode).toBe("https")
+    expect(startArgs.mode).toBe("http")
     expect(startArgs).not.toHaveProperty("https")
     expect(startArgs).not.toHaveProperty("enabled")
+    log.mockRestore()
   })
 
   it("calls shutdown when the dev server closes", async () => {
@@ -111,21 +117,26 @@ describe("etherna plugin", () => {
     })
   })
 
-  it("injects the SSL certificate into server/preview config when https is requested", async () => {
+  it("does not inject SSL when https is requested because the plugin applies the http fallback", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {})
     const { etherna } = await import("../src/index.ts")
-    const plugin = etherna({ https: true })
+    const options = { https: true }
+    const plugin = etherna(options)
     const config = { server: {}, preview: {} } as {
       server: { https?: unknown; port?: number }
       preview: { https?: unknown }
     }
 
+    expect(options.https).toBe(false)
+
     const configResolved = getConfigResolved(plugin)
     await configResolved?.call({} as never, config as never)
 
-    expect(generateSslCertificateMock).toHaveBeenCalledOnce()
-    expect(config.server.https).toEqual({ cert: "CERT", key: "KEY" })
-    expect(config.preview.https).toEqual({ cert: "CERT", key: "KEY" })
-    expect(config.server.port).toBe(5371)
+    expect(generateSslCertificateMock).not.toHaveBeenCalled()
+    expect(config.server.https).toBeUndefined()
+    expect(config.preview.https).toBeUndefined()
+    expect(config.server.port).toBe(5173)
+    log.mockRestore()
   })
 
   it("sets the default http app port and skips SSL when https is not requested", async () => {
