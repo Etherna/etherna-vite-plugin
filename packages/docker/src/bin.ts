@@ -1,2 +1,3 @@
-console.error("etherna CLI not implemented yet")
-process.exit(1)
+import { runCli } from "./cli"
+
+void runCli()
