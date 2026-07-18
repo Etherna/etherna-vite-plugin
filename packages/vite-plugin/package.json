@@ -24,9 +24,7 @@
   "scripts": {
     "build": "pnpm tsup",
     "test": "pnpm vitest run",
-    "typecheck": "pnpm tsc --noEmit",
-    "lint": "pnpm oxlint",
-    "format": "pnpm oxfmt"
+    "typecheck": "pnpm tsc --noEmit"
   },
   "peerDependencies": {
     "vite": "^7.0.0 || ^8.0.0"
