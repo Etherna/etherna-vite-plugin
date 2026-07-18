@@ -4,8 +4,6 @@ import forge from "node-forge"
 import "node-forge/lib/pki"
 import { CERTIFICATE_PASSWORD } from "./consts"
 
-createCertificate()
-
 function toPositiveHex(hexString: string) {
   let mostSignificativeHexAsInt = parseInt(hexString[0] ?? "0", 16)
   if (mostSignificativeHexAsInt < 8) {

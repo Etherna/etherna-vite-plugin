@@ -10,6 +10,7 @@ import {
 } from "./consts"
 import { resolvePath, runCommand } from "./utils"
 
+/** Generates (and OS-trusts) a self-signed certificate for the Vite dev/preview server, caching it on disk. */
 export async function generateSslCertificate() {
   if (
     fs.existsSync(getCertificatePath("cert")) &&
@@ -27,7 +28,7 @@ export async function generateSslCertificate() {
   }
 
   if (!fs.existsSync(resolvePath(CERTIFICATE_DIR))) {
-    fs.mkdirSync(resolvePath(CERTIFICATE_DIR))
+    fs.mkdirSync(resolvePath(CERTIFICATE_DIR), { recursive: true })
   }
 
   const certs = createCertificate("etherna.localhost", ["host.docker.internal"])
@@ -82,18 +83,6 @@ async function trustCertificate() {
   await trustProc.catch((err: unknown) => {
     console.error(chalk.red("‼️ Error trusting ssl certificate: " + (err as Error).message))
   })
-}
-
-export async function trustContainerCertificate(containerName: string) {
-  await runCommand("docker", ["exec", containerName, "update-ca-certificates"]).catch(
-    (err: unknown) => {
-      console.error(
-        chalk.red(
-          `‼️ Error trusting certificate in container '${containerName}': ${(err as Error).message}`,
-        ),
-      )
-    },
-  )
 }
 
 export function getCertificatePath(type: "cert" | "key" | "pfx") {
