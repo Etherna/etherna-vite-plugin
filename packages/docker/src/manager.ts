@@ -1,6 +1,6 @@
 import chalk from "chalk"
 
-import { SERVICE_CATALOG, type StartupCode } from "./catalog"
+import { ALL_SERVICE_NAMES, SERVICE_CATALOG, type StartupCode } from "./catalog"
 import { createDependencyRunner, type DependencyRunnerServiceDefinition } from "./dependency-runner"
 import {
   buildServiceEnvs,
@@ -21,8 +21,8 @@ import {
   type PortlessServiceAlias,
 } from "./portless"
 import { resolveStartPlan } from "./resolve-options"
-import { ensureDockerReady, stopContainer } from "./runtime/docker"
-import { containerNamesFor, stopEnabled } from "./runtime/names"
+import { ensureDockerReady } from "./runtime/docker"
+import { stopEnabled, stopLogicalServices } from "./runtime/names"
 import { startAspContainer } from "./services/asp"
 import {
   isBlockchainBootstrapInProgress,
@@ -49,19 +49,6 @@ import type {
 } from "./types"
 import type { ChildProcess } from "node:child_process"
 
-const VALID_SERVICE_NAMES: readonly EthernaServiceName[] = [
-  "blockchain",
-  "bee",
-  "beehive",
-  "credit",
-  "elastic",
-  "gateway",
-  "index",
-  "mongo",
-  "shkeeper",
-  "sso",
-]
-
 /**
  * Stops the Docker container groups for the named logical service(s). Multi-container services stop
  * as a whole group and overlapping groups are de-duplicated (see {@link containerNamesFor}).
@@ -70,14 +57,13 @@ const VALID_SERVICE_NAMES: readonly EthernaServiceName[] = [
 export async function stop(services: EthernaServiceName | EthernaServiceName[]): Promise<void> {
   const names = Array.isArray(services) ? services : [services]
   for (const name of names) {
-    if (!VALID_SERVICE_NAMES.includes(name)) {
+    if (!ALL_SERVICE_NAMES.includes(name)) {
       throw new TypeError(
-        `Unknown Etherna service "${String(name)}". Valid services: ${VALID_SERVICE_NAMES.join(", ")}.`,
+        `Unknown Etherna service "${String(name)}". Valid services: ${ALL_SERVICE_NAMES.join(", ")}.`,
       )
     }
   }
-  const containerNames = [...new Set(names.flatMap(containerNamesFor))]
-  await Promise.all(containerNames.map((name) => stopContainer(name)))
+  await stopLogicalServices(names)
 }
 
 /** Reads per-service env overrides from a `StartOptions` service value (`boolean | { env }`). */
