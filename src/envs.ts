@@ -120,18 +120,18 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
     portless && portlessAppPublicUrl
       ? normalizePortlessAppPublicUrl(portlessAppPublicUrl)
       : publicHttpUrl(mode, appPort, portless, "app")
-  const indexPublicUrl = publicHttpUrl(mode, indexPort, portless, "index")
-  const creditPublicUrl = publicHttpUrl(mode, creditPort, portless, "credit")
-  const gatewayPublicUrl = publicHttpUrl(mode, gatewayPort, portless, "gateway")
+  // const indexPublicUrl = publicHttpUrl(mode, indexPort, portless, "index")
+  // const creditPublicUrl = publicHttpUrl(mode, creditPort, portless, "credit")
+  // const gatewayPublicUrl = publicHttpUrl(mode, gatewayPort, portless, "gateway")
 
   const baseAspEnv = {
     ASPNETCORE_ENVIRONMENT: "Development",
     "Elastic:Urls:0": "http://localhost:9200",
     ...(mode === "https"
       ? {
-        ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
-        ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
-      }
+          ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
+          ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
+        }
       : {}),
   }
 
@@ -182,9 +182,9 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       /** Issuer/authority for discovery; keep bind URL so services and DNS inside containers resolve it. */
       "IdServer:SsoServer:BaseUrl": ssoBindUrl,
       "IdServer:SsoServer:AllowUnsafeConnection": "true",
-      "IdServer:Clients:EthernaCredit:BaseUrl": creditPublicUrl,
-      "IdServer:Clients:EthernaGateway:BaseUrls:0": gatewayPublicUrl,
-      "IdServer:Clients:EthernaIndex:BaseUrl": indexPublicUrl,
+      "IdServer:Clients:EthernaCredit:BaseUrl": creditBindUrl,
+      "IdServer:Clients:EthernaGateway:BaseUrls:0": gatewayBindUrl,
+      "IdServer:Clients:EthernaIndex:BaseUrl": indexBindUrl,
       "IdServer:Clients:EthernaDapp:BaseUrl": appPublicUrl,
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSSODataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaSSOHangfireDev`,
@@ -222,7 +222,7 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       ASPNETCORE_URLS: gatewayBindUrl,
       "ForwardedHeaders:KnownNetworks:0": "0.0.0.0/0",
       "SsoServer:BaseUrl": ssoBindUrl,
-      "SsoServer:Clients:Credit:BaseUrl": creditPublicUrl,
+      "SsoServer:Clients:Credit:BaseUrl": creditBindUrl,
       "SsoServer:Clients:Credit:Secret": "ethernaGatewayCreditClientSecret",
       "SsoServer:Clients:Webapp:Secret": "ethernaGatewayWebappClientSecret",
       "SsoServer:AllowUnsafeConnection": "true",
@@ -281,7 +281,6 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
   return envs
 }
 
-
 export function defaultServiceEnvBuildContext(mode: "http" | "https"): ServiceEnvBuildContext {
   return {
     mode,
@@ -336,8 +335,6 @@ export function stripPluginInternalEnvKeys<T extends Record<string, unknown>>(en
   const internal = new Set<string>(BEE_PLUGIN_INTERNAL_ENV_KEYS)
   return Object.fromEntries(Object.entries(env).filter(([key]) => !internal.has(key))) as T
 }
-
-
 
 export type BuiltServiceEnvs = ReturnType<typeof buildServiceEnvs>
 

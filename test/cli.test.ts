@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 
-import { parseCliArgs, resolveCliServiceSelection } from "../src/cli.ts"
+import {
+  createCliServiceEnvBuildContext,
+  parseCliArgs,
+  resolveCliServiceSelection,
+} from "../src/cli.ts"
+import { PORTLESS_URL_ENV } from "../src/portless.ts"
 
 describe("parseCliArgs", () => {
   it("parses start services and portless options", () => {
@@ -11,6 +16,21 @@ describe("parseCliArgs", () => {
         appPort: 3000,
         portless: true,
       },
+    })
+  })
+})
+
+describe("createCliServiceEnvBuildContext", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, PORTLESS_URL_ENV)
+  })
+
+  it("uses PORTLESS_URL as the dapp public URL when portless is enabled", () => {
+    process.env[PORTLESS_URL_ENV] = "http://dapp.etherna.localhost:1355/"
+
+    expect(createCliServiceEnvBuildContext({ portless: true })).toMatchObject({
+      portless: true,
+      portlessAppPublicUrl: "http://dapp.etherna.localhost:1355",
     })
   })
 })

@@ -152,6 +152,23 @@ export function resolveCliServiceSelection(services: CliServiceName[]): EnabledE
   }
 }
 
+export function createCliServiceEnvBuildContext(
+  options: CliStartOptions = {},
+): ServiceEnvBuildContext {
+  const defaultContext = defaultServiceEnvBuildContext("http")
+  const portless = Boolean(options.portless)
+  const portlessAppPublicUrl = getEnvVar(PORTLESS_URL_ENV)?.trim()
+
+  return {
+    ...defaultContext,
+    appPort: options.appPort ?? defaultContext.appPort,
+    portless,
+    ...(portless && portlessAppPublicUrl
+      ? { portlessAppPublicUrl: normalizePortlessAppPublicUrl(portlessAppPublicUrl) }
+      : {}),
+  }
+}
+
 function parsePort(raw: string | undefined, flag: string): number {
   const value = Number(raw)
   if (!Number.isInteger(value) || value < 1 || value > 65_535) {
@@ -447,13 +464,8 @@ function createCliServiceDefinitions({
 export async function startCliServices(services: CliServiceName[], options: CliStartOptions = {}) {
   const codes = resolveStartupCodes(services)
   const enabled = resolveCliServiceSelection(services)
-  const defaultContext = defaultServiceEnvBuildContext("http")
   const detached = options.detached ?? true
-  const context: ServiceEnvBuildContext = {
-    ...defaultContext,
-    appPort: options.appPort ?? defaultContext.appPort,
-    portless: Boolean(options.portless),
-  }
+  const context = createCliServiceEnvBuildContext(options)
 
   const harness = harnessEthernaPlugin({ ...enabled, detached, portless: context.portless })
   harness.installProcessSignalHandlers()
