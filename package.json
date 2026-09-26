@@ -1,6 +1,7 @@
 {
   "private": true,
   "scripts": {
+    "dev": "vite",
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
@@ -15,6 +16,7 @@
     "oxfmt": "0.44.0",
     "oxlint": "1.59.0",
     "oxlint-tsgolint": "0.20.0",
+    "portless": "0.15.4",
     "typescript": "6.0.2",
     "vite": "8.0.8"
   },
