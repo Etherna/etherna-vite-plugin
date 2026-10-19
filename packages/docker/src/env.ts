@@ -129,9 +129,9 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
     "Elastic:Urls:0": "http://localhost:9200",
     ...(mode === "https"
       ? {
-          ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
-          ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
-        }
+        ASPNETCORE_Kestrel__Certificates__Default__Path: `${CONTAINER_CERTS_DIR}/${CERTIFICATE_PFX_NAME}`,
+        ASPNETCORE_Kestrel__Certificates__Default__Password: CERTIFICATE_PASSWORD,
+      }
       : {}),
   }
 
@@ -186,6 +186,9 @@ export function buildServiceEnvs(context: ServiceEnvBuildContext) {
       "IdServer:Clients:EthernaGateway:BaseUrls:0": gatewayBindUrl,
       "IdServer:Clients:EthernaIndex:BaseUrl": indexBindUrl,
       "IdServer:Clients:EthernaDapp:BaseUrl": appPublicUrl,
+      "DbSeed:Clients:0:RedirectUris:0": `${appPublicUrl}/callback`,
+      "DbSeed:Clients:0:PostLogoutRedirectUris:0": appPublicUrl,
+      "DbSeed:Clients:0:AllowedCorsOrigins:0": appPublicUrl,
       "ConnectionStrings:DataProtectionDb": `${mongodbUrl}/ethernaSSODataProtectionDev`,
       "ConnectionStrings:HangfireDb": `${mongodbUrl}/ethernaSSOHangfireDev`,
       "ConnectionStrings:ServiceSharedDb": `${mongodbUrl}/ethernaServiceSharedDev`,

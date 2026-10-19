@@ -83,6 +83,9 @@ type SsoEnvShape = BaseAspEnvShape & {
   "IdServer:Clients:EthernaGateway:BaseUrls:0": string
   "IdServer:Clients:EthernaIndex:BaseUrl": string
   "IdServer:Clients:EthernaDapp:BaseUrl": string
+  "DbSeed:Clients:0:RedirectUris:0": string
+  "DbSeed:Clients:0:PostLogoutRedirectUris:0": string
+  "DbSeed:Clients:0:AllowedCorsOrigins:0": string
   "ConnectionStrings:DataProtectionDb": string
   "ConnectionStrings:HangfireDb": string
   "ConnectionStrings:ServiceSharedDb": string

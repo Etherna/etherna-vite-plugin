@@ -1,6 +1,6 @@
 {
   "name": "@etherna/docker",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Orchestrate Etherna Docker services from Node and CLI",
   "author": "Mattia Dalzocchio",
   "license": "LGPL-3.0-or-later",

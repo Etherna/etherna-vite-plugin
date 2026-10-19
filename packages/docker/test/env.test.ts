@@ -23,6 +23,9 @@ describe("buildServiceEnvs", () => {
     const envs = buildServiceEnvs({ mode: "http", portless: false, appPort: 5174 })
     expect(envs["etherna-sso"].ASPNETCORE_URLS).toBe("http://localhost:32610")
     expect(envs["etherna-sso"]["IdServer:SsoServer:BaseUrl"]).toBe("http://localhost:32610")
+    expect(envs["etherna-sso"]["DbSeed:Clients:0:RedirectUris:0"]).toBe(
+      "http://localhost:5174/callback",
+    )
     expect(envs.app.port).toBe(5174)
     expect(envs["etherna-beehive"]["SeedDb:BeeNodes:0:ConnectionString"]).toBe(
       "http://localhost:1633",
@@ -45,12 +48,24 @@ describe("buildServiceEnvs", () => {
     expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe(
       "http://dapp.etherna.localhost:1355",
     )
+    expect(envs["etherna-sso"]["DbSeed:Clients:0:RedirectUris:0"]).toBe(
+      "http://dapp.etherna.localhost:1355/callback",
+    )
+    expect(envs["etherna-sso"]["DbSeed:Clients:0:PostLogoutRedirectUris:0"]).toBe(
+      "http://dapp.etherna.localhost:1355",
+    )
+    expect(envs["etherna-sso"]["DbSeed:Clients:0:AllowedCorsOrigins:0"]).toBe(
+      "http://dapp.etherna.localhost:1355",
+    )
   })
 
   it("uses portless only for browser-facing client base URLs when portless is on", () => {
     const envs = buildServiceEnvs({ mode: "http", portless: true, appPort: 9999 })
     expect(envs["etherna-sso"]["IdServer:Clients:EthernaDapp:BaseUrl"]).toBe(
       "http://app.localhost:1355",
+    )
+    expect(envs["etherna-sso"]["DbSeed:Clients:0:RedirectUris:0"]).toBe(
+      "http://app.localhost:1355/callback",
     )
     // Server-side client base URLs stay on localhost bind ports (only the browser-facing dapp URL
     // is proxied through Portless); the commented-out `indexPublicUrl` in env.ts confirms this.
