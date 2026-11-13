@@ -1,25 +1,28 @@
 import { expect, it } from "vitest"
 
 import {
-  PORTLESS_PROXY_PORT,
   getPortlessPublicUrl,
   normalizePortlessAppPublicUrl,
   parsePortlessPort,
   portlessAliasAddArgs,
+  portlessCliEnv,
   portlessProxyStartArgs,
 } from "../src/portless.ts"
 
-it("PORTLESS_PROXY_PORT is 1355", () => {
-  expect(PORTLESS_PROXY_PORT).toBe(1355)
+it("getPortlessPublicUrl uses http://alias.localhost with no port", () => {
+  expect(getPortlessPublicUrl("sso")).toBe("http://sso.localhost")
+  expect(getPortlessPublicUrl("bee")).toBe("http://bee.localhost")
 })
 
-it("getPortlessPublicUrl builds http://alias.localhost:1355", () => {
-  expect(getPortlessPublicUrl("sso")).toBe("http://sso.localhost:1355")
-  expect(getPortlessPublicUrl("bee")).toBe("http://bee.localhost:1355")
+it("portlessProxyStartArgs starts an unprivileged HTTP proxy on the default port", () => {
+  expect(portlessProxyStartArgs()).toEqual(["proxy", "start", "--no-tls", "--unprivileged"])
 })
 
-it("portlessProxyStartArgs pins HTTP proxy to port 1355 without TLS", () => {
-  expect(portlessProxyStartArgs()).toEqual(["proxy", "start", "-p", "1355", "--no-tls"])
+it("portlessCliEnv sets PORTLESS_UNPRIVILEGED so the proxy can bind port 80", () => {
+  expect(portlessCliEnv({ PATH: "/usr/bin" })).toEqual({
+    PATH: "/usr/bin",
+    PORTLESS_UNPRIVILEGED: "1",
+  })
 })
 
 it("portlessAliasAddArgs includes force when requested", () => {
@@ -27,9 +30,7 @@ it("portlessAliasAddArgs includes force when requested", () => {
 })
 
 it("normalizePortlessAppPublicUrl trims and strips trailing slashes", () => {
-  expect(normalizePortlessAppPublicUrl("  http://dapp.localhost:1355/  ")).toBe(
-    "http://dapp.localhost:1355",
-  )
+  expect(normalizePortlessAppPublicUrl("  http://dapp.localhost/  ")).toBe("http://dapp.localhost")
 })
 
 it("parsePortlessPort accepts numbers and numeric strings", () => {

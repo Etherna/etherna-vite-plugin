@@ -248,10 +248,11 @@ or `ETHERNA_DETACHED` instead.
 
 ### Portless (optional)
 
-When [portless](https://portless.sh/) is installed, you can opt in to friendly local URLs on the
-default HTTP proxy port (`1355`). `start()` starts the Portless proxy (if needed), registers aliases
-for the app and each enabled HTTP service, and sets **browser-facing** OIDC client redirect base
-URLs to the Portless hostnames (e.g. `http://sso.localhost:1355` for client registrations).
+When [portless](https://portless.sh/) is installed, you can opt in to friendly local URLs such as
+`http://app.localhost`. `start()` starts the Portless proxy in unprivileged mode (`PORTLESS_UNPRIVILEGED`,
+plain HTTP on port 80, no sudo), registers aliases for the app and each enabled HTTP service, and sets
+**browser-facing** OIDC client redirect base URLs to the Portless hostnames (e.g. `http://sso.localhost`
+for client registrations).
 **Authority and server-to-server URLs** (SSO authority, gateway/Beehive API bases used by backends)
 stay on `http://localhost:<port>` so services inside Docker can resolve them; `*.localhost` names
 often fail with "Name or service not known" in containers.
@@ -275,7 +276,9 @@ export default defineConfig({
 ```
 
 Requires the `portless` CLI on your `PATH`. Portless integration is HTTP-only (the HTTPS path is not
-supported yet).
+supported yet). On Linux, allow port 80 without root once per machine
+(`sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80`). If a proxy is already listening on port
+1355, run `portless proxy stop` so the next start binds port 80.
 
 ## Breaking changes (1.7.0)
 

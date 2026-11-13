@@ -1,8 +1,5 @@
 import { spawn } from "node:child_process"
 
-/** HTTP proxy port used by Portless when running without TLS (see portless docs). */
-export const PORTLESS_PROXY_PORT = 1355
-
 /** Alias names registered with `portless alias <name> <port>`. */
 export type PortlessServiceAlias =
   | "app"
@@ -23,7 +20,7 @@ export const PORTLESS_CONTAINER_ALIASES: Record<string, PortlessServiceAlias> = 
 }
 
 export function getPortlessPublicUrl(alias: PortlessServiceAlias): string {
-  return `http://${alias}.localhost:${PORTLESS_PROXY_PORT}`
+  return `http://${alias}.localhost`
 }
 
 /** Env name set by the Portless CLI when it wraps your dev process (public URL for the app). */
@@ -35,7 +32,12 @@ export function normalizePortlessAppPublicUrl(url: string): string {
 }
 
 export function portlessProxyStartArgs(): string[] {
-  return ["proxy", "start", "-p", String(PORTLESS_PROXY_PORT), "--no-tls"]
+  return ["proxy", "start", "--no-tls", "--unprivileged"]
+}
+
+/** Env for every `portless` spawn. Unprivileged mode binds HTTP on port 80 without sudo. */
+export function portlessCliEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...env, PORTLESS_UNPRIVILEGED: "1" }
 }
 
 export function portlessProxyStopArgs(): string[] {
@@ -60,7 +62,10 @@ export async function runPortlessCli(args: string[]): Promise<{
   stdout: string
 }> {
   return new Promise((resolve, reject) => {
-    const proc = spawn("portless", args, { stdio: ["ignore", "pipe", "pipe"] })
+    const proc = spawn("portless", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: portlessCliEnv(),
+    })
     let stdout = ""
     let stderr = ""
     proc.stdout?.on("data", (d) => {
@@ -87,8 +92,8 @@ export async function isPortlessCliAvailable(): Promise<boolean> {
 }
 
 /**
- * Starts the Portless HTTP proxy on {@link PORTLESS_PROXY_PORT}. If the proxy is already
- * running, returns `startedByUs: false` without failing.
+ * Starts the Portless HTTP proxy in unprivileged mode (plain HTTP on port 80). If the proxy
+ * is already running, returns `startedByUs: false` without failing.
  */
 export async function ensurePortlessProxy(): Promise<{ startedByUs: boolean }> {
   const r = await runPortlessCli(portlessProxyStartArgs())

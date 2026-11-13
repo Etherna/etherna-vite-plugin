@@ -93,7 +93,7 @@ export interface ServiceEnvBuildContext {
   appPort: number
   /**
    * When set (e.g. `PORTLESS_URL` from the Portless CLI), used as the browser-facing dapp base URL
-   * instead of `http://app.localhost:1355`. The plugin skips registering the `app` Portless alias.
+   * instead of `http://app.localhost`. The plugin skips registering the `app` Portless alias.
    */
   portlessAppPublicUrl?: string
 }
