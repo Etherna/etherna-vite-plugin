@@ -8,7 +8,30 @@ import { generateSslCertificate } from "./ssl"
 
 import type { EthernaPluginOptions } from "./options"
 import type { EthernaSessionHandle, StartOptions } from "@etherna/docker"
-import type { Plugin, ServerOptions } from "vite"
+
+/**
+ * Returned to the host Vite config. This is not Vite's `Plugin`: that interface recurses through
+ * `UserConfig.plugins`, and a linked install resolves a different copy of Vite than the app. Checking
+ * one copy against the other is the "Excessive stack depth comparing types ... and 'UserConfig'" error.
+ */
+interface EthernaVitePlugin {
+  name: string
+  apply: "serve"
+  config: (
+    userConfig: { envDir?: string | false; root?: string },
+    env: { mode: string },
+  ) => void
+  configResolved: (config: {
+    server: { https?: unknown; port?: number }
+    preview: { https?: unknown }
+  }) => void | Promise<void>
+  configureServer: (server: {
+    httpServer?: {
+      once(event: "listening" | "close", listener: () => void | Promise<void>): void
+      address(): string | { port?: number } | null
+    } | null
+  }) => void
+}
 
 export type { EthernaPluginOptions } from "./options"
 export { applyEthernaPluginHttpsFallback, defineEthernaPlugin, getDevServerPort } from "./options"
@@ -21,7 +44,7 @@ const ETHERNA_ENV_PREFIXES: string[] = ["ETHERNA_", "PORTLESS_"]
  * them on close. All orchestration lives in `@etherna/docker`; this plugin only wires Vite-specific
  * concerns: env-prefix loading, SSL cert injection, and the `enabled` / `https` options.
  */
-export function etherna(options: EthernaPluginOptions = {}): Plugin {
+export function etherna(options: EthernaPluginOptions = {}): EthernaVitePlugin {
   applyEthernaPluginHttpsFallback(options)
 
   let shutdown: EthernaSessionHandle["shutdown"] | undefined
@@ -34,7 +57,10 @@ export function etherna(options: EthernaPluginOptions = {}): Plugin {
       // client-side `import.meta.env` and filtered by `envPrefix`). The Etherna services run in
       // Node and only read a small, well-known set of variables, so we restrict the merge to those
       // prefixes — keeping the user's other secrets out of `process.env`.
-      const envDir = userConfig.envDir ?? userConfig.root ?? process.cwd()
+      const envDir =
+        (userConfig.envDir === false ? undefined : userConfig.envDir) ??
+        userConfig.root ??
+        process.cwd()
       const fileEnv = loadEnv(mode, envDir, ETHERNA_ENV_PREFIXES)
       for (const [key, value] of Object.entries(fileEnv)) {
         process.env[key] ??= value
@@ -43,7 +69,7 @@ export function etherna(options: EthernaPluginOptions = {}): Plugin {
     async configResolved(config) {
       if (options.https) {
         const { cert, key } = await generateSslCertificate()
-        const https = { cert, key } as ServerOptions
+        const https = { cert, key }
 
         config.server.https = Object.assign({}, config.server.https, https)
         config.preview.https = Object.assign({}, config.preview.https, https)

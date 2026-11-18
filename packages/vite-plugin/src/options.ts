@@ -1,7 +1,6 @@
 import chalk from "chalk"
 
 import type { StartOptions } from "@etherna/docker"
-import type { ViteDevServer } from "vite"
 
 /**
  * Options accepted by the {@link etherna} Vite plugin: the full docker `StartOptions` surface plus
@@ -14,8 +13,20 @@ export type EthernaPluginOptions = StartOptions & {
   https?: boolean
 }
 
+/**
+ * The slice of a Vite dev server `getDevServerPort` reads.
+ * Structural on purpose: the published signature must not name Vite's `ViteDevServer`, which
+ * recurses through `UserConfig` and breaks `defineConfig` when a linked install resolves a second
+ * copy of Vite.
+ */
+interface DevServerPortSource {
+  httpServer?: {
+    address(): string | { port?: number } | null
+  } | null
+}
+
 /** Reads the actual listening port from the dev server, falling back to `fallbackPort` when unavailable. */
-export function getDevServerPort(server: ViteDevServer, fallbackPort: number): number {
+export function getDevServerPort(server: DevServerPortSource, fallbackPort: number): number {
   const addr = server.httpServer?.address()
   if (addr && typeof addr === "object" && "port" in addr && typeof addr.port === "number") {
     return addr.port

@@ -1,7 +1,10 @@
 import { EventEmitter } from "node:events"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { etherna as EthernaPluginFactory } from "../src/index.ts"
 import type { Plugin } from "vite"
+
+void (true satisfies ReturnType<typeof EthernaPluginFactory> extends Plugin ? true : never)
 
 const { startMock, shutdownMock, generateSslCertificateMock } = vi.hoisted(() => {
   const shutdownMock = vi.fn(() => Promise.resolve())
